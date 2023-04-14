@@ -1,7 +1,7 @@
 
-# Deribit Options Loader
+# Deribit option order book loader
 
-This program fetches and saves the options order book data for given currencies to Parquet files using the Deribit API v2.
+This program fetches and saves the option order book data for given crypto to Parquet files using the Deribit API v2.
 It runs every 5mn but can be configured for other timeframes.
 The provided jupyter notebook shows how to aggregate the data.
 
