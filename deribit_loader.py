@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 import gc
 import concurrent.futures
+import os
 
 logging.basicConfig(
     filename='log/deribit_loader.log',
@@ -14,10 +15,6 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S')
 
 logger = logging.getLogger(__name__)
-
-# Deribit API key and secret
-api_key = ""
-api_secret = ""
 
 # Deribit API v2 base URL
 base_url = "https://www.deribit.com/api/v2/"
@@ -29,9 +26,6 @@ coins = ['BTC', 'ETH']
 timeframe = '5m'
 
 timeframe_minutes = {
-    "1m": 1,
-    "2m": 2,
-    "3m": 3,
     "5m": 5,
     "15m": 15,
     "30m": 30,
@@ -58,19 +52,23 @@ def fetch_option_data(inst):
 
     retries = 5
     while retries > 0:
-        response = requests.get(base_url + endpoint, params=params)
+        try:
+            response = requests.get(base_url + endpoint, params=params)
+        except Exception as e:
+            logger.error(f"Failed to fetch option data for {inst}.\nException arised during request: {e}")
+            return None
         result = response.json()
         if 'error' in result and result['error']['code'] == 10028:
-            wait_time = int(response.headers.get('retry-after', '60'))
+            wait_time = int(response.headers.get('retry-after', '2'))
             logger.info(f"Too many requests, waiting for {wait_time} seconds")
             time.sleep(wait_time)
             retries -= 1
         elif 'result' in result:
             return result['result']
-        else:
-            raise ValueError(f"Unexpected response: {result}")
     
-    raise RuntimeError(f"Failed to fetch data for {inst}")
+    # if we get here, it means the request failed
+    logger.error(f"Failed to fetch option data for {inst}.\nUnexpected response: {result}")
+    return None
 
 
 
@@ -108,14 +106,14 @@ def save_to_parquet(df, filename):
     except Exception as e:
         logger.error(f"Failed to save\n {df}\n with exception {e}")
 
+
 def fetch_and_save_data(currencies):
     """
     Fetches and saves the options data for given currencies to Parquet files.
     """
     logger.info(f"Starting job at {datetime.now()}")
 
-    # Fetch options data
-    instruments_per_request = 20 # deribit burst rate limit
+    instruments_per_request = 40 
 
     for currency in currencies:
         instruments = [inst['instrument_name'] for inst in fetch_available_instruments(currency)['result']]
@@ -124,11 +122,19 @@ def fetch_and_save_data(currencies):
         options_data = pd.DataFrame()
         for inst_list in instruments_lists:
             with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                options_data = pd.concat([options_data, 
-                                          pd.DataFrame(list(executor.map(fetch_option_data, inst_list)))], axis = 0)
+                result = list(executor.map(fetch_option_data, inst_list))
+                # Filter out None values from the result list
+                result = [r for r in result if r is not None]
+                if len(result) > 0:
+                    options_data = pd.concat([options_data, pd.DataFrame(result)], axis=0)
             time.sleep(1)
-        
-        save_to_parquet(options_data, f'{data_folder}/{currency.lower()}_options_data_{datetime.now().strftime("%Y%m%d_%H%M")}.parquet')
+
+        # aggregate new data with existing data
+        agg_file_name = f"{data_folder}/{currency.lower()}_{timeframe}_options_data.parquet"
+        if os.path.exists(agg_file_name):
+            options_data = pd.concat([pd.read_parquet(agg_file_name),options_data], axis = 0)
+
+        save_to_parquet(options_data, agg_file_name)
 
         del options_data
         gc.collect()
