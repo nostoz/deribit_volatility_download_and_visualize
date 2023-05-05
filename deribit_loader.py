@@ -149,7 +149,7 @@ def get_next_run_time(timeframe):
     """
     Get the time until the next multiple of `timeframe` minutes and 00 seconds
     """
-    current_time = time.localtime()
+    current_time = time.localtime() 
     next_run = (timeframe_minutes[timeframe] - current_time.tm_min % timeframe_minutes[timeframe]) * 60 \
                 - current_time.tm_sec
 
