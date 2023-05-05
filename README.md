@@ -19,8 +19,6 @@ This program requires Python 3.6 or higher.
 
 To run the program, execute the following command:
 
-Copy code
-
 `python3 deribit_loader.py` 
 
 The program will fetch and save the options data for the specified crypto-currencies to Parquet files in the `data` folder.
@@ -28,8 +26,6 @@ The program will fetch and save the options data for the specified crypto-curren
 ## Examples
 
 To fetch and save the options data for BTC and ETH, run:
-
-Copy code
 
 `python3 deribit_loader.py` 
 
