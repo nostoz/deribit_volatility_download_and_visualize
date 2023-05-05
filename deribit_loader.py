@@ -129,8 +129,11 @@ def fetch_and_save_data(currencies):
                     options_data = pd.concat([options_data, pd.DataFrame(result)], axis=0)
             time.sleep(1)
 
+        # get the UTC time at the start of the current day
+        current_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y%m%d")
+
         # aggregate new data with existing data
-        agg_file_name = f"{data_folder}/{currency.lower()}_{timeframe}_options_data.parquet"
+        agg_file_name = f"{data_folder}/{currency.lower()}_{timeframe}_{current_day}_options_data.parquet"
         if os.path.exists(agg_file_name):
             options_data = pd.concat([pd.read_parquet(agg_file_name),options_data], axis = 0)
 
