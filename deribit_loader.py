@@ -6,6 +6,7 @@ import logging
 import gc
 import concurrent.futures
 import os
+import functools
 
 logging.basicConfig(
     filename='log/deribit_loader.log',
@@ -34,12 +35,12 @@ timeframe_minutes = {
     "1d": 1440
 }
 
-def fetch_option_data(inst):
+def fetch_instrument_data(inst, depth = 10):
     """
-    Fetches order book data for the specified option instrument.
+    Fetches order book data for the specified instrument.
 
     Args:
-        inst (str): Name of the option instrument to fetch data for.
+        inst (str): Name of the instrument to fetch data for.
 
     Returns:
         dict: The order book data for the specified instrument.
@@ -47,7 +48,7 @@ def fetch_option_data(inst):
     endpoint = "public/get_order_book"
     params = {
         "instrument_name": inst,
-        "depth": 1
+        "depth": depth
     }
 
     retries = 5
@@ -55,7 +56,7 @@ def fetch_option_data(inst):
         try:
             response = requests.get(base_url + endpoint, params=params)
         except Exception as e:
-            logger.error(f"Failed to fetch option data for {inst}.\nException arised during request: {e}")
+            logger.error(f"Failed to fetch data for {inst}.\nException arised during request: {e}")
             return None
         result = response.json()
         if 'error' in result and result['error']['code'] == 10028:
@@ -67,12 +68,12 @@ def fetch_option_data(inst):
             return result['result']
     
     # if we get here, it means the request failed
-    logger.error(f"Failed to fetch option data for {inst}.\nUnexpected response: {result}")
+    logger.error(f"Failed to fetch data for {inst}.\nUnexpected response: {result}")
     return None
 
 
 
-def fetch_available_instruments(currency):
+def fetch_available_instruments(currency, kind):
     """
     Fetches the available option instruments for the specified currency.
 
@@ -82,16 +83,18 @@ def fetch_available_instruments(currency):
     Returns:
         dict: The available option instruments for the specified currency.
     """
+
     endpoint = "public/get_instruments"
     params = {
         "currency": currency,
         "depth": 1,
-        "kind" : "option",
+        "kind" : kind,
         "expired" : "false"
     }
     
     response = requests.get(base_url + endpoint, params=params)
     return response.json()
+
 
 def save_to_parquet(df, filename):
     """
@@ -109,37 +112,54 @@ def save_to_parquet(df, filename):
 
 def fetch_and_save_data(currencies):
     """
-    Fetches and saves the options data for given currencies to Parquet files.
+    Fetches and saves the futures/options data for given currencies to Parquet files.
     """
     logger.info(f"Starting job at {datetime.now()}")
 
     instruments_per_request = 40 
 
     for currency in currencies:
-        instruments = [inst['instrument_name'] for inst in fetch_available_instruments(currency)['result']]
-        instruments_lists = [instruments[i:i+instruments_per_request] for i in range(0, len(instruments), instruments_per_request)]
+        option_instruments = [inst['instrument_name'] for inst in fetch_available_instruments(currency, 'option')['result']]
+        option_instruments_lists = [option_instruments[i:i+instruments_per_request] for i in range(0, len(option_instruments), instruments_per_request)]
+        future_instruments = [inst['instrument_name'] for inst in fetch_available_instruments(currency, 'future')['result']]
+        future_instruments_lists = [future_instruments[i:i+instruments_per_request] for i in range(0, len(future_instruments), instruments_per_request)]
 
         options_data = pd.DataFrame()
-        for inst_list in instruments_lists:
+        for inst_list in option_instruments_lists:
             with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                result = list(executor.map(fetch_option_data, inst_list))
+                result = list(executor.map(fetch_instrument_data, inst_list))
                 # Filter out None values from the result list
                 result = [r for r in result if r is not None]
                 if len(result) > 0:
                     options_data = pd.concat([options_data, pd.DataFrame(result)], axis=0)
             time.sleep(1)
 
+        futures_data = pd.DataFrame()
+        for inst_list in future_instruments_lists:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                result = list(executor.map(fetch_instrument_data, inst_list))
+                # Filter out None values from the result list
+                result = [r for r in result if r is not None]
+                if len(result) > 0:
+                    futures_data = pd.concat([futures_data, pd.DataFrame(result)], axis=0)
+            time.sleep(1)
+
         # get the UTC time at the start of the current day
         current_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y%m%d")
 
         # aggregate new data with existing data
-        agg_file_name = f"{data_folder}/{currency.lower()}_{timeframe}_{current_day}_options_data.parquet"
-        if os.path.exists(agg_file_name):
-            options_data = pd.concat([pd.read_parquet(agg_file_name),options_data], axis = 0)
+        opt_agg_file_name = f"{data_folder}/{currency.lower()}_{timeframe}_{current_day}_options_data.parquet"
+        if os.path.exists(opt_agg_file_name):
+            options_data = pd.concat([pd.read_parquet(opt_agg_file_name),options_data], axis = 0)
+        save_to_parquet(options_data, opt_agg_file_name)
 
-        save_to_parquet(options_data, agg_file_name)
+        fut_agg_file_name = f"{data_folder}/{currency.lower()}_{timeframe}_{current_day}_futures_data.parquet"
+        if os.path.exists(fut_agg_file_name):
+            futures_data = pd.concat([pd.read_parquet(fut_agg_file_name),futures_data], axis = 0)
+        save_to_parquet(futures_data, fut_agg_file_name)
 
         del options_data
+        del futures_data
         gc.collect()
 
     logger.info(f"Job completed at {datetime.now()}")
