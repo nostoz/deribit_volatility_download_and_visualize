@@ -1,5 +1,5 @@
 
-# Deribit option order book loader
+# Deribit future and option order book loader
 
 This program fetches and saves the option order book from Deribit exchange for given crypto-currencies to Parquet files using the Deribit API v2.   
 It does not download the historical order books as it's not available through the API, but rather captures it live and builds an history continuously.   
@@ -48,4 +48,5 @@ MIT License
 ## Additional Resources
 
 -   [Deribit API documentation](https://docs.deribit.com/)
+
 -   [InfluxDB Linux installation](https://docs.influxdata.com/influxdb/v2.7/install/?t=Linux)
