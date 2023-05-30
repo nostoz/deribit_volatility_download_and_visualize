@@ -10,7 +10,6 @@ from influxdb_client import InfluxDBClient
 
 import json
 
-config = read_json('config.json')
 
 class MarketDataBuilder():
     
@@ -363,6 +362,8 @@ class MarketDataBuilder():
 
 
 if __name__ == "__main__":
+    
+    config = read_json('config.json')
     
     md_builder_btc = MarketDataBuilder(config['data_folder'], 'btc')
     md_builder_eth = MarketDataBuilder(config['data_folder'], 'eth')

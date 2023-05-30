@@ -6,7 +6,6 @@ import logging
 import gc
 import concurrent.futures
 import os
-import functools
 
 logging.basicConfig(
     filename='log/deribit_loader.log',
