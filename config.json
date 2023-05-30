@@ -2,9 +2,8 @@
     
     "data_folder": "./data",
     "database": {
-        "token": "LfKW-uMGVyySAHc-qg9QLUuKvPmbeL1KAaZbAq0rbumxw5i2rv9PvTLAav8-UbsVZC3fY2pFvCqSmjEmD6xEBw==",
-        "org": "crypto_vol",
+        "token": "INFLUXDB-TOKEN-HERE",
+        "org": "org",
         "url": "http://localhost:8086"
     }
 }
-
