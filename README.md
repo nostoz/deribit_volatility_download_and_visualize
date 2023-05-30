@@ -1,5 +1,5 @@
 
-# Deribit future and option order book loader
+# Deribit volatility downloader and visualizer
 
 This program fetches and saves the option order book from Deribit exchange for given crypto-currencies to Parquet files using the Deribit API v2.   
 It does not download the historical order books as it's not available through the API, but rather captures it live and builds an history continuously.   
@@ -17,6 +17,11 @@ Features:
 ## Installation
 
 This program requires Python 3.6 or higher and an InfluxDB database if you wish to store the market data in a time-series DB. 
+The following python modules are required:
+- influxdb_client : python client to interact with InfluxDB database
+- scipy : required for cubic spline interpolation of the smile
+- tqdm : used to display the progression when processing the downloaded market data files
+
 
 ## Usage
 
@@ -29,7 +34,11 @@ The program will fetch and save every 5mn the options and futures data for the s
 
 ## Examples
 
-To build volatility smiles from the parquet file, run the following method from the MarketDataBuilder class :
+### Market data construction
+
+
+Volatility smiles are built on a sticky-delta basis ranging from 5-delta put to ATM and all the way to 5-delta call.
+To build volatility smiles from the parquet files, run the following method from the MarketDataBuilder class :
 
 `save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m')`
 
@@ -41,6 +50,29 @@ It's also possible the save the full order book in influxdb although it's heavy 
 `save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m')`
 
 
+### Volatility smile and surface visualization
+
+The jupyter notebook 'vol_visualization' shows a few ways of looking at the volatility smile using a basic influxdb wrapper that pulls the volatility
+data from the influxdb database.
+
+3d volatility surface
+
+![Vol surface](/pics/surface.JPG)
+
+
+Volatility smile
+
+![Vol smile](/pics/smile.JPG)
+
+
+Volatility term structure
+
+![Vol term structure](/pics/term_structure.JPG)
+
+
+Historical implied volatility per delta and expiry
+
+![Historical vol](/pics/historical_vol.JPG)
 ## License
 
 MIT License
@@ -48,5 +80,5 @@ MIT License
 ## Additional Resources
 
 -   [Deribit API documentation](https://docs.deribit.com/)
-
 -   [InfluxDB Linux installation](https://docs.influxdata.com/influxdb/v2.7/install/?t=Linux)
+-   [InfluxDB-client-python](https://github.com/influxdata/influxdb-client-python)
