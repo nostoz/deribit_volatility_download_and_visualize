@@ -354,12 +354,13 @@ class MarketDataBuilder():
                                         data_frame_tag_columns=['instrument_name'],
                                         data_frame_timestamp_column='timestamp_datetime')
                                         # time_precision='ms')
-            
+
                     processed_folder = f"{self.path}/Processed"
                     if not os.path.exists(processed_folder):
                         os.makedirs(processed_folder)
-
+                        
                     os.rename(f"{self.path}/{file}", f"{processed_folder}/{file}")
+
                     success = True
         except Exception as e:
                     print(f"An error occurred : {str(e)}")
