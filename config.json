@@ -1,0 +1,9 @@
+{
+    
+    "data_folder": "./data",
+    "database": {
+        "token": "INFLUXDB-TOKEN-HERE",
+        "org": "org",
+        "url": "http://localhost:8086"
+    }
+}
