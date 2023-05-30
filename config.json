@@ -1,5 +1,4 @@
 {
-    
     "data_folder": "./data",
     "database": {
         "token": "INFLUXDB-TOKEN-HERE",

@@ -159,12 +159,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 data/*
-notebook/process_deribit_data.ipynb
+notebook/*
 deribit_loader_temp.py
-log/deribit_loader.log
-notebook/Lognormal SABR vs Normal SABR.pdf
-notebook/StochVolModel_deribit.ipynb
-notebook/vols.csv
-data/btc_5m_options_data.parquet
-data/eth_5m_options_data.parquet
-notebook/build_volsurfaces_from_deribit.ipynb
+log/*

@@ -8,26 +8,38 @@ It runs every 5mn but can be configured for other timeframes.
 Features:
 - runs 20 concurrent threads to pull the data from Deribit
 - supports multiple timeframes (min 5m as it takes between 1-3mn to download the data at every iteration)
-- saves the data as parquet file 
-- recommended to let it run on a vps to run continuously
+- saves the data as parquet files 
+- it is recommended to let it run on a vps to run continuously
+- build the volatility smiles (CubicSpline interpolation - SABR to come later)
+- saves the volatility surfaces in InfluxDB
+- saves the full order book in InfluxDB (heavy size)
 
 ## Installation
 
-This program requires Python 3.6 or higher. 
+This program requires Python 3.6 or higher and an InfluxDB database if you wish to store the market data in a time-series DB. 
 
 ## Usage
 
-To run the program, execute the following command:
+To start the download of order books from deribit:
 
 `python3 deribit_loader.py` 
 
-The program will fetch and save the options data for the specified crypto-currencies to Parquet files in the `data` folder.
+The program will fetch and save every 5mn the options and futures data for the specified crypto-currencies to Parquet files in the `data` folder.
+
 
 ## Examples
 
-To fetch and save the options data for BTC and ETH, run:
+To build volatility smiles from the parquet file, run the following method from the MarketDataBuilder class :
 
-`python3 deribit_loader.py` 
+`save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m')`
+
+This will save to the influxdb bucket 'btc_vol_surfaces' all the volatility smiles contain in the files in the data folder that matches the pattern 'btc_5m'.
+The file config.json needs to be properly filled with the influxdb information to run this method.
+
+It's also possible the save the full order book in influxdb although it's heavy on the disk:
+
+`save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m')`
+
 
 ## License
 
@@ -36,3 +48,4 @@ MIT License
 ## Additional Resources
 
 -   [Deribit API documentation](https://docs.deribit.com/)
+-   [InfluxDB Linux installation](https://docs.influxdata.com/influxdb/v2.7/install/?t=Linux)
