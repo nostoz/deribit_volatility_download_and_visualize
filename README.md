@@ -29,7 +29,7 @@ To start the download of order books from deribit:
 
 `python3 deribit_loader.py` 
 
-The program will fetch and save every 5mn the options and futures data for the specified crypto-currencies to Parquet files in the `data` folder.
+The program will fetch and save every 5mn the options and futures data for the specified crypto-currencies to Parquet files in the `data` folder. One day of data per file.
 
 
 ## Examples
@@ -42,12 +42,14 @@ To build volatility smiles from the parquet files, run the following method from
 
 `save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m')`
 
-This will save to the influxdb bucket 'btc_vol_surfaces' all the volatility smiles contain in the files in the data folder that matches the pattern 'btc_5m'.
+This will save to the influxdb bucket 'btc_vol_surfaces' all the volatility smiles contained in the files in the data folder that match the pattern 'btc_5m'.
 The file config.json needs to be properly filled with the influxdb information to run this method.
 
 It's also possible the save the full order book in influxdb although it's heavy on the disk:
 
 `save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m')`
+
+Once a file is processed successfully by one of the above methods, it is moved to the Processed folder.
 
 
 ### Volatility smile and surface visualization
@@ -73,6 +75,17 @@ Volatility term structure
 Historical implied volatility per delta and expiry
 
 ![Historical vol](/pics/historical_vol.JPG)
+
+
+Historical risk reversal per delta and tenor
+
+![Historical risk reversal](/pics/rr.JPG)
+
+
+Historical butterfly per delta and tenor
+
+![Historical butterfly](/pics/butterfly.JPG)
+
 ## License
 
 MIT License
