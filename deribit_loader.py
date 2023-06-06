@@ -3,9 +3,14 @@ import time
 import pandas as pd
 from datetime import datetime
 import logging
+from telegram_log_handler import TelegramLogHandler
 import gc
 import concurrent.futures
 import os
+import traceback
+from utils import read_json 
+
+config = read_json('config.json')
 
 logging.basicConfig(
     filename='log/deribit_loader.log',
@@ -15,6 +20,10 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S')
 
 logger = logging.getLogger(__name__)
+
+if config['telegram']['enabled'] == True:
+    telegram_handler = TelegramLogHandler(config['telegram']['bot_token'], config['telegram']['chat_id'])
+    logger.addHandler(telegram_handler)
 
 # Deribit API v2 base URL
 base_url = "https://www.deribit.com/api/v2/"
@@ -60,7 +69,7 @@ def fetch_instrument_data(inst, depth = 10):
         result = response.json()
         if 'error' in result and result['error']['code'] == 10028:
             wait_time = int(response.headers.get('retry-after', '2'))
-            logger.info(f"Too many requests, waiting for {wait_time} seconds")
+            logger.warning(f"Too many requests, waiting for {wait_time} seconds")
             time.sleep(wait_time)
             retries -= 1
         elif 'result' in result:
@@ -179,10 +188,21 @@ if __name__ == '__main__':
     logger.info("Loader started")
 
     while True:
-        # Pause until the next multiple of `timeframe` minutes and 00 seconds
-        next_run = get_next_run_time(timeframe)
-        logger.info(f"next run in {next_run} seconds")
-        time.sleep(next_run)
+        try:
+            # Pause until the next multiple of `timeframe` minutes and 00 seconds
+            next_run = get_next_run_time(timeframe)
+            logger.info(f"next run in {next_run} seconds")
+            time.sleep(next_run)
 
-        # Run the job
-        fetch_and_save_data(coins)
+            # Run the job
+            fetch_and_save_data(coins)
+
+        except Exception:
+            # Catch any exception that occurs
+            logger.error("An exception occurred:")
+            logger.error(traceback.format_exc())
+
+            # Restart the program after a delay
+            logger.info("Restarting the loader...")
+            time.sleep(60)
+            continue

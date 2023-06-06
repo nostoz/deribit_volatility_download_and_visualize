@@ -101,7 +101,7 @@ class InfluxDBWrapper():
 
             return vol_surface
         
-    def get_historical_vol_for_delta_and_expiry(self, bucket, measurement, range_start, range_end, delta, expiry, field):
+    def get_historical_vol_for_delta_and_expiry(self, bucket, measurement, range_start, range_end, delta, expiry, field, timeframe = False):
         """
         Retrieves the historical volatility data for a specific delta and expiry range.
 
@@ -124,13 +124,16 @@ class InfluxDBWrapper():
                         |> filter(fn: (r) => r.expiry == "{expiry}")\
                         |> filter(fn: (r) => r.delta == "{delta}")\
                         |> filter(fn: (r) => r._field == "{field}")'
+            
+            if timeframe != False:
+                query = f'{query}\n|> aggregateWindow(every: {timeframe}, fn: last, createEmpty: false)'
 
             result = client.query_api().query(query)
 
             return pd.DataFrame(data=result.to_values(columns=['_time', '_value']), columns=['timestamp', field])
 
 
-    def get_historical_vol(self, bucket, measurement, range_start, range_end, field):
+    def get_historical_vol(self, bucket, measurement, range_start, range_end, field, timeframe = False):
         """
         Retrieves the historical volatility data for a specified range.
 
@@ -149,6 +152,9 @@ class InfluxDBWrapper():
                         |> range(start: {range_start}, stop: {range_end})\
                         |> filter(fn: (r) => r._measurement == "{measurement}") \
                         |> filter(fn: (r) => r._field == "{field}")'
+            
+            if timeframe != False:
+                query = f'{query}\n|> aggregateWindow(every: {timeframe}, fn: last, createEmpty: false)'
 
             result = client.query_api().query(query)
 
@@ -193,10 +199,10 @@ class InfluxDBWrapper():
 
         return pd.DataFrame(data=result, columns=['date', 'expiry1', 'expiry2']).set_index('date')
         
-    @timeit
-    def get_historical_vol_for_tenor(self, bucket, measurement, range_start, range_end, delta, tenor, field):
+    def get_historical_vol_for_delta_and_tenor(self, bucket, measurement, range_start, range_end,
+                                                delta, tenor, field, timeframe = False):
         """
-        Retrieves the historical volatility data for a specific tenor.
+        Retrieves the historical volatility data for a specific tenor and delta.
 
         Args:
             bucket (str): The name of the InfluxDB bucket.
@@ -220,12 +226,13 @@ class InfluxDBWrapper():
             result_df = pd.DataFrame(columns=['timestamp', 'expiry', 'delta', field])
             for expiry in unique_expiries:
                 res = self.get_historical_vol_for_delta_and_expiry(bucket=bucket,
-                                                                measurement='volatility',
+                                                                measurement=measurement,
                                                                 range_start=range_start,
                                                                 range_end=range_end,
                                                                 delta=delta,
                                                                 expiry=expiry,
-                                                                field=field)
+                                                                field=field,
+                                                                timeframe=timeframe)
                 res['delta'] = delta
                 res['expiry'] = expiry
                 result_df = pd.concat([result_df, res], axis=0)
@@ -239,17 +246,86 @@ class InfluxDBWrapper():
 
             tenor_vols['expiry1'] = pd.to_datetime(nearby_expiries['expiry1'])
             tenor_vols['expiry2'] = pd.to_datetime(nearby_expiries['expiry2'])
+            tenor_vols['rolling_expiry'] = tenor_vols.index.map(lambda x: add_tenor(x, tenor=tenor))
+            # print(tenor_vols)
 
-            tenor_vols['diff_to_exp1'] = abs((tenor_vols['expiry1'] - tenor_vols.index).dt.days)
-            tenor_vols['diff_to_exp2'] = abs((tenor_vols['expiry2'] - tenor_vols.index).dt.days)
+            tenor_vols['diff_to_exp1'] = abs((tenor_vols['expiry1'] - tenor_vols['rolling_expiry']).dt.days)
+            tenor_vols['diff_to_exp2'] = abs((tenor_vols['expiry2'] - tenor_vols['rolling_expiry']).dt.days)
             tenor_vols['diff_exp'] = tenor_vols['diff_to_exp1'] + tenor_vols['diff_to_exp2']
            
             for idx, row in tenor_vols.iterrows():
                 interp_vol1 = (1 - row['diff_to_exp1'] / row['diff_exp']) * vols.loc[idx, row['expiry1'].date()]
                 interp_vol2 = (1 - row['diff_to_exp2'] / row['diff_exp']) * vols.loc[idx, row['expiry2'].date()]
                 tenor_vols.loc[idx, field] = interp_vol1 + interp_vol2
-                
-        return tenor_vols[field]
+            # tenor_vols.to_csv('check.csv')
+        # return tenor_vols[field]
+        return pd.DataFrame(data=tenor_vols[field], columns=[field]).reset_index()
+
+    @timeit
+    def get_historical_risk_reversal_by_delta_and_tenor(self, bucket, measurement, range_start, range_end, 
+                                                        delta, tenor, field, normalize_by_ATM=False, timeframe = False):
+        history_calls = self.get_historical_vol_for_delta_and_tenor(bucket=bucket,
+                      measurement=measurement,
+                      range_start=range_start,
+                      range_end=range_end,
+                      delta=f"{delta}C",
+                      tenor=tenor,
+                      field=field,
+                      timeframe=timeframe)
+        
+        history_puts = self.get_historical_vol_for_delta_and_tenor(bucket=bucket,
+                      measurement=measurement,
+                      range_start=range_start,
+                      range_end=range_end,
+                      delta=f"{delta}P",
+                      tenor=tenor,
+                      field=field,
+                      timeframe=timeframe)
+
+        if normalize_by_ATM == True:
+            history_ATM = self.get_historical_vol_for_delta_and_tenor(bucket=bucket,
+                      measurement=measurement,
+                      range_start=range_start,
+                      range_end=range_end,
+                      delta="ATM",
+                      tenor=tenor,
+                      field=field,
+                      timeframe=timeframe)
+            return pd.concat([history_calls['timestamp'], (history_calls - history_puts)[field] / history_ATM[field]], axis = 1)
+        else:
+            return pd.concat([history_calls['timestamp'], (history_calls - history_puts)[field]], axis = 1)
+
+    def get_historical_butterfly_by_delta_and_tenor(self, bucket, measurement, range_start, range_end, 
+                                                        delta, tenor, field, timeframe = False):
+        history_calls = self.get_historical_vol_for_delta_and_tenor(bucket=bucket,
+                      measurement=measurement,
+                      range_start=range_start,
+                      range_end=range_end,
+                      delta=f"{delta}C",
+                      tenor=tenor,
+                      field=field,
+                      timeframe=timeframe)
+        
+        history_puts = self.get_historical_vol_for_delta_and_tenor(bucket=bucket,
+                      measurement=measurement,
+                      range_start=range_start,
+                      range_end=range_end,
+                      delta=f"{delta}P",
+                      tenor=tenor,
+                      field=field,
+                      timeframe=timeframe)
+        
+        history_ATM = self.get_historical_vol_for_delta_and_tenor(bucket=bucket,
+                      measurement=measurement,
+                      range_start=range_start,
+                      range_end=range_end,
+                      delta="ATM",
+                      tenor=tenor,
+                      field=field,
+                      timeframe=timeframe)
+        
+        
+        return pd.concat([history_calls['timestamp'], (history_calls[field] + history_puts[field] - 2 * history_ATM[field])], axis = 1)
 
     
 if __name__ == "__main__":
@@ -274,19 +350,38 @@ if __name__ == "__main__":
     
     history_vol_for_delta_expiry = wrapper.get_historical_vol_for_delta_and_expiry(bucket='eth_vol_surfaces',
                       measurement='volatility',
-                      range_start='2023-05-22T00:00:00Z',
+                      range_start='2023-05-10T00:00:00Z',
                       range_end='2023-05-27T12:05:00Z',
                       delta='ATM',
                       expiry='2023-09-29',
-                      field='mid_iv')
+                      field='mid_iv',
+                      timeframe='4h')
     
-    history_vol_for_tenor = wrapper.get_historical_vol_for_tenor(bucket='eth_vol_surfaces',
+    history_vol_for_tenor = wrapper.get_historical_vol_for_delta_and_tenor(bucket='eth_vol_surfaces',
                       measurement='volatility',
                       range_start='2023-05-22T00:00:00Z',
                       range_end='2023-05-27T00:00:00Z',
                       delta='ATM',
                       tenor='90D',
                       field='mid_iv')
+    
+    history_risk_reversal = wrapper.get_historical_risk_reversal_by_delta_and_tenor(bucket='eth_vol_surfaces',
+                      measurement='volatility',
+                      range_start='2023-05-25T00:00:00Z',
+                      range_end='2023-06-05T09:00:00Z',
+                      delta=15,
+                      tenor='90D',
+                      field='mid_iv',
+                      timeframe='15m')
+    
+    history_flies = wrapper.get_historical_butterfly_by_delta_and_tenor(bucket='btc_vol_surfaces',
+                      measurement='volatility',
+                      range_start='2023-06-01T00:00:00Z',
+                      range_end='2023-06-06T15:35:00Z',
+                      delta=15,
+                      tenor='1M',
+                      field='mid_iv',
+                      timeframe='15m')
 
 
     print(smile)
@@ -294,4 +389,6 @@ if __name__ == "__main__":
     print(vol_surface)
     print(history_vol_for_delta_expiry)
     print(history_vol_for_tenor)
+    print(history_risk_reversal)
+    print(history_flies)
 

@@ -1,9 +1,13 @@
 {
-    
     "data_folder": "./data",
     "database": {
-        "token": "INFLUXDB-TOKEN-HERE",
-        "org": "org",
+        "token": "<influxdb-token>",
+        "org": "<org>",
         "url": "http://localhost:8086"
+    },
+    "telegram": {
+        "enabled": "true",
+        "bot_token": "<bot-token>",
+        "chat_id": "<chat-id>"
     }
 }

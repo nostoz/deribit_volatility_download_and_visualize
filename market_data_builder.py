@@ -5,6 +5,7 @@ from utils import timeit, read_json
 
 from tqdm import tqdm
 import os
+import time
 
 from influxdb_client import InfluxDBClient
 
@@ -315,7 +316,7 @@ class MarketDataBuilder():
                                                 data_frame_tag_columns=['delta', 'expiry'],
                                                 data_frame_timestamp_column='obs_time')
                                                 # time_precision='ms')
-
+                        
                         os.rename(f"{self.path}/{file}", f"{self.path}/Processed/{file}")
                         success = True
         except Exception as e:
@@ -377,6 +378,9 @@ if __name__ == "__main__":
     # md_builder_btc.save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m')
     # md_builder_eth.save_order_book_to_influxdb('eth_deribit_order_book', 'eth_5m')
 
-    # save volatility surfaces in InfluxDB
+    # save volatility surfaces to InfluxDB
     md_builder_btc.save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m')
     md_builder_eth.save_surfaces_to_influxdb('eth_vol_surfaces', file_pattern='eth_5m')
+
+
+        

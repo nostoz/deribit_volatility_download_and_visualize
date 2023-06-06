@@ -166,3 +166,5 @@ notebook/backtest_vol.ipynb
 notebook/build_volsurfaces_from_deribit.ipynb
 notebook/process_deribit_data.ipynb
 notebook/StochVolModel_deribit.ipynb
+notebook/weekly_seasonality_dvol.ipynb
+notebook/WIP-vol_visualization.ipynb
