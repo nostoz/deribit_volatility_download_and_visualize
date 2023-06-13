@@ -159,13 +159,13 @@ class MarketDataBuilder():
         for expiry in data['expiry'].unique():
             try:
                 # filter out smiles for today's expiries if time is greater than 7:30 UTC (less than 30mn before expiry)
-                raw_vol = data[(data['expiry'] + pd.to_timedelta('7:30:00') > obs_time.tz_localize(None)) & (data['expiry'] == expiry)][['cp', 'delta', 'bid_iv', 'mark_iv', 'ask_iv']]
+                raw_vol = data[(data['expiry'] + pd.to_timedelta('7:30:00') > obs_time.tz_localize(None)) & (data['expiry'] == expiry)][['cp', 'delta', 'bid_iv', 'mark_iv', 'ask_iv']].drop_duplicates(subset='delta')
                 
                 # keep only OTM options and with delta higher than 5%
                 raw_vol = raw_vol[(raw_vol['delta'] < 0.5) & (raw_vol['delta'] > -0.5) & (raw_vol['delta'].abs() > 0.05)]
                 
-                #skip if less than 5 quotes
-                if raw_vol.shape[0] < 5:
+                #skip if less than 5 quotes or if only calls or puts quotes
+                if raw_vol.shape[0] < 5 or raw_vol['cp'].value_counts().shape[0] < 2:
                     continue
                 smile_data = self.get_smile_for_expiry(raw_vol.to_numpy())
             
@@ -381,6 +381,3 @@ if __name__ == "__main__":
     # save volatility surfaces to InfluxDB
     md_builder_btc.save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m')
     md_builder_eth.save_surfaces_to_influxdb('eth_vol_surfaces', file_pattern='eth_5m')
-
-
-        
