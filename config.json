@@ -1,13 +1,13 @@
 {
     "data_folder": "./data",
     "database": {
-        "token": "<influxdb-token>",
-        "org": "<org>",
+        "token": "LfKW-uMGVyySAHc-qg9QLUuKvPmbeL1KAaZbAq0rbumxw5i2rv9PvTLAav8-UbsVZC3fY2pFvCqSmjEmD6xEBw==",
+        "org": "crypto_vol",
         "url": "http://localhost:8086"
     },
     "telegram": {
         "enabled": "true",
-        "bot_token": "<bot-token>",
-        "chat_id": "<chat-id>"
+        "bot_token": "5418859019:AAH-dYs2lzRWbqCPhsXEl5VW1rGCifuduLg",
+        "chat_id": "-963361253"
     }
 }
