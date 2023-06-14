@@ -168,3 +168,4 @@ notebook/process_deribit_data.ipynb
 notebook/StochVolModel_deribit.ipynb
 notebook/weekly_seasonality_dvol.ipynb
 notebook/WIP-vol_visualization.ipynb
+notebook/cointegration_backtester.ipynb

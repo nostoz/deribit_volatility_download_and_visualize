@@ -111,14 +111,33 @@ def read_json(file_path):
         return json.load(f)
     
 
-def B(F,K,t, sigma, cp_flag):
-    d1 = ((np.log(F/K)  + 0.5 * sigma **2 * t) / (sigma * np.sqrt (t)))
-    d2 = d1 - sigma * np.sqrt(t) 
-    opt = cp_flag*(F*np.norm.cdf(cp_flag*d1) - K*np.norm.cdf(cp_flag*d2))
-    delta = cp_flag*np.norm.cdf(cp_flag*d1)
-    vega = F*np.norm.pdf(d1)*np.sqrt(t)
-    return opt, delta , vega
+def get_number_of_timeframes_in_one_day(timeframe):
+    """
+    Calculates the number of a specific timeframe in one day.
 
+    Args:
+        timeframe (str): The timeframe to calculate (e.g., '5m', '15m', '2h', '1d').
+
+    Returns:
+        int: The number of the specified timeframes in one day.
+    """
+    # Dictionary mapping timeframes to their respective minutes
+    timeframe_minutes = {
+        'm': 1,     # minutes
+        'h': 60,    # hours
+        'd': 1440   # days
+    }
+
+    # Extract the numeric value and timeframe unit from the input
+    numeric_value = int(timeframe[:-1])
+    timeframe_unit = timeframe[-1]
+
+    # Calculate the number of timeframes in one day
+    minutes_in_one_day = 24 * 60
+    minutes_per_timeframe = numeric_value * timeframe_minutes[timeframe_unit]
+    timeframes_in_one_day = minutes_in_one_day // minutes_per_timeframe
+
+    return timeframes_in_one_day
 
 def add_tenor(date, tenor):
     unit = tenor[-1].upper()

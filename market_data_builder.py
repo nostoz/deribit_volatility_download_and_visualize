@@ -261,7 +261,7 @@ class MarketDataBuilder():
             
             # # Commit the changes and close the connection
             conn.commit()
-            # conn.close()
+            conn.close()
 
             success = True
 
@@ -300,22 +300,15 @@ class MarketDataBuilder():
                         for observation_time, snapshot_surface in vol_surfaces.items():
                             for expiry, smile_df in snapshot_surface.items():
                                 forward = forward_curves[observation_time][expiry]
-                                # smile_data = smile_df.to_dict(orient='records')
-                                # smile_data_json = json.dumps(smile_data)
                                 smile_df['obs_time'] = observation_time
                                 smile_df['underlying_price'] = forward
                                 smile_df['expiry'] = expiry
-
-
-                                # observation_time = str(observation_time)[0:19]
-                                # expiry = str(expiry)[0:10]
 
                                 write_api.write(bucket=bucket, 
                                                 record=smile_df, 
                                                 data_frame_measurement_name="volatility",
                                                 data_frame_tag_columns=['delta', 'expiry'],
                                                 data_frame_timestamp_column='obs_time')
-                                                # time_precision='ms')
                         
                         os.rename(f"{self.path}/{file}", f"{self.path}/Processed/{file}")
                         success = True
