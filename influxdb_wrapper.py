@@ -460,15 +460,6 @@ if __name__ == "__main__":
                       tenor=['7D', '90D'],
                       field='mid_iv')
     
-    history_vol_for_tenor = wrapper.get_historical_vol_for_delta_and_tenor(bucket='eth_vol_surfaces',
-                    measurement='volatility',
-                    range_start='2023-06-10T02:00:00Z', 
-                    range_end='2023-06-13T05:45:00Z', 
-                    delta='15P', 
-                    tenor='3M', 
-                    field='mid_iv',
-                    timeframe='1h')
-    
     history_risk_reversal = wrapper.get_historical_risk_reversal_by_delta_and_tenor(bucket='eth_vol_surfaces',
                       measurement='volatility',
                       range_start='2023-05-25T00:00:00Z',
