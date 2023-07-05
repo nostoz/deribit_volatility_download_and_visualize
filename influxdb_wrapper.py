@@ -44,11 +44,6 @@ class InfluxDBWrapper():
                 for a in arg[1:]:
                     r_arg = f'{r_arg} or r.{arg_name} =~ /{a}/'
 
-            # for a in arg[1:]:
-            #     if regex == False:
-            #         r_arg = f'{r_arg} or r.{arg_name} == "{a}"'
-            #     else:  
-            #         r_arg = f'{r_arg} or r.{arg_name} =~ /{a}/'
         return r_arg
 
     def get_smile_for_obs_time(self, bucket, measurement, expiry, obs_time, field = 'mid_iv'):
