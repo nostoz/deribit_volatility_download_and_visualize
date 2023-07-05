@@ -12,7 +12,7 @@ Features:
 - build the volatility smiles (CubicSpline interpolation - SABR to come later)
 - saves the volatility surfaces in InfluxDB
 - saves the full order book in InfluxDB
-- computes vol analytics like risk reversals, butterflies, eth vs btc diffs... and saved them in InfluxDB
+- computes vol analytics like risk reversals, butterflies, eth vs btc diffs... and saves them in InfluxDB
 - visualize the vol analytics with Grafana (dashboard provided in /Grafana)
 
 ## Installation
