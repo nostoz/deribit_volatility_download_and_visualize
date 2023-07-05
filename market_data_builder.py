@@ -285,7 +285,7 @@ class MarketDataBuilder():
         - bucket (str): InfluxDB bucket name.
         - pattern (str): File pattern for selecting the order book data files.
         - light_book(bool) : Save a light version of the order book (e.g. no depth of order book)
-        - move_old_files(bool) : Move the files older than today to the Processed folder once processed.
+        - move_old_files(bool) : Move the files older than today to the Processed folder once processed if True.
         
         Returns:
         - bool: True if the saving process is successful, False otherwise.
@@ -337,7 +337,7 @@ class MarketDataBuilder():
         Parameters:
         - bucket (str): InfluxDB bucket name.
         - file_pattern (str): File pattern for selecting the option data files.
-        - move_old_files(bool) : Move the files older than today to the Processed folder once processed.
+        - move_old_files(bool) : Move the files older than today to the Processed folder once processed if True.
         
         Returns:
         - bool: True if the saving process is successful, False otherwise.
