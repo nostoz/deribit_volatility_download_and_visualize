@@ -1,29 +1,39 @@
 import pandas as pd
 import numpy as np
 from scipy.interpolate import CubicSpline
-from utils import timeit, read_json
+from utils import timeit, read_json, get_number_of_timeframes_in_one_day
 
 from tqdm import tqdm
 import os
 import time
+from datetime import datetime, date, timedelta
+import logging 
 
 from influxdb_client import InfluxDBClient
+from influxdb_wrapper import InfluxDBWrapper
 
 import json
 
+logging.basicConfig(
+    filename='log/market_data_builder.log',
+    encoding='utf-8', 
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)-8s %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S')
+
+logger = logging.getLogger(__name__)
 
 class MarketDataBuilder():
     
-    def __init__(self, path, currency) -> None:
+    def __init__(self, config_path) -> None:
         """
         Parameters:
-        - path (str): Path to the data folder containing the option data files.
+        - path (str): Path to the config file.
         - currency (str): Currency symbol.
 
         """
-        self.path = path
-        self.currency = currency
         self.db_client = None
+        self.config = read_json(config_path)
 
     def get_smile_for_expiry(self, data):
         """
@@ -125,7 +135,6 @@ class MarketDataBuilder():
         
         return option_data
 
-    @timeit
     def get_option_data(self, path):
         """
         Reads and retrieves the option data from a given file path.
@@ -176,11 +185,10 @@ class MarketDataBuilder():
                 surface[pd.to_datetime(expiry).date()] = smile
                 forwards[pd.to_datetime(expiry).date()] = data[data['expiry'] == expiry]['underlying_price'].mean()
             except Exception as e:
-                print(f"failed with {e} on obs_time = {obs_time} and expiry = {expiry}")
+                logger.error(f"get_vol_surface_on_time failed with {e} on obs_time = {obs_time} and expiry = {expiry}")
             
         return surface, forwards
 
-    @timeit
     def extract_vol_surfaces_from_file(self, datafile):
         """
         Extracts the volatility surfaces and forward curves from a given data file.
@@ -201,7 +209,6 @@ class MarketDataBuilder():
 
         return surfaces, forward_curves
 
-    @timeit
     def save_surfaces_to_db(self, vol_surfaces, forward_curves, conn):
         """
         Saves the volatility surfaces and forward curves to a SQLite database.
@@ -249,7 +256,7 @@ class MarketDataBuilder():
                         # Update the existing row
                         conn.execute('UPDATE snapshots SET observation_time = ?, expiry = ?, smile_data = ?, underlying_price = ? WHERE snapshot_id = ?',
                                     (observation_time, expiry, smile_data_json, forward, snapshot_id))
-                        print(f"Snapshopt ID {snapshot_id} was replaced with the new data")
+                        logger.error(f"Snapshopt ID {snapshot_id} was replaced with the new data")
                     else:
 
                         insert_values.append((snapshot_id, observation_time, expiry, smile_data_json, forward))
@@ -266,19 +273,71 @@ class MarketDataBuilder():
             success = True
 
         except Exception as e:
-            print(f"An error occurred: {str(e)}")
+            logger.error(f"An error occurred: {str(e)}")
             
         return success
     
+    def save_order_book_to_influxdb(self, bucket, file_pattern, light_book = True, move_old_files=False):
+        """
+        Saves the order book data to an InfluxDB database.
+        
+        Parameters:
+        - bucket (str): InfluxDB bucket name.
+        - pattern (str): File pattern for selecting the order book data files.
+        - light_book(bool) : Save a light version of the order book (e.g. no depth of order book)
+        - move_old_files(bool) : Move the files older than today to the Processed folder once processed.
+        
+        Returns:
+        - bool: True if the saving process is successful, False otherwise.
+        """
+        success = False
+        files = [file.name for file in os.scandir(self.config['data_folder']) if not file.is_dir() and file_pattern in file.name and 'futures' not in file.name]
+        
+        try:
+            with InfluxDBClient(url=self.config['database']['url'], token=self.config['database']['token'], org=self.config['database']['org'], timeout=30_000) as client:
+                for file in tqdm(files, total=len(files)):
+                    data = self.get_option_data(f"{self.config['data_folder']}/{file}")
 
-    @timeit
-    def save_surfaces_to_influxdb(self, bucket, file_pattern):
+                    if light_book == True:
+                        data['strike'] = data['strike'].astype(int)
+                        data['moneyness'] = (data['underlying_price'] - data['strike']) * np.where(data['cp'] == 'C', 1, -1)
+                        columns_to_keep = ['underlying_price', 'timestamp', 'settlement_price', 'open_interest', 'mark_price', 'mark_iv', 'last_price', 'instrument_name',\
+                                            'index_price', 'bid_iv', 'best_bid_price', 'best_bid_amount', 'best_ask_price', 'best_ask_amount', 'ask_iv', 'delta',\
+                                            'gamma', 'rho', 'theta', 'vega', 'asset', 'expiry', 'strike', 'cp']
+                        data = data[columns_to_keep]
+
+
+                    data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
+                    with client.write_api() as write_api:
+                        write_api.write(bucket=bucket, 
+                                        record=data, 
+                                        data_frame_measurement_name="order_book",
+                                        data_frame_tag_columns=['instrument_name'],
+                                        data_frame_timestamp_column='timestamp')
+                                        # time_precision='s')
+
+                    processed_folder = f"{self.config['data_folder']}/Processed"
+                    if not os.path.exists(processed_folder):
+                        os.makedirs(processed_folder)
+                        
+                    if move_old_files == True:
+                        yesterday = date.today() - timedelta(days=1)
+                        file_date = datetime.strptime(file.split("_")[2], "%Y%m%d").date()
+                        if file_date < yesterday:
+                            os.rename(f"{self.config['data_folder']}/{file}", f"{self.config['data_folder']}/Processed/{file}")
+
+                    success = True
+        except Exception as e:
+                    logger.error(f"An error occurred with save_order_book_to_influxdb: {str(e)}")
+
+    def save_surfaces_to_influxdb(self, bucket, file_pattern, move_old_files=False):
         """
         Saves the volatility surfaces and forward curves to an InfluxDB database.
         
         Parameters:
         - bucket (str): InfluxDB bucket name.
         - file_pattern (str): File pattern for selecting the option data files.
+        - move_old_files(bool) : Move the files older than today to the Processed folder once processed.
         
         Returns:
         - bool: True if the saving process is successful, False otherwise.
@@ -286,14 +345,13 @@ class MarketDataBuilder():
         success = False
 
         try:
-            with InfluxDBClient(url=config['database']['url'], token=config['database']['token'], org=config['database']['org'], timeout=30_000) as client:
+            with InfluxDBClient(url=self.config['database']['url'], token=self.config['database']['token'], org=self.config['database']['org'], timeout=30_000) as client:
             
                 with client.write_api() as write_api:
 
-                    files = [file.name for file in os.scandir(self.path) if not file.is_dir() and file_pattern in file.name]
+                    files = [file.name for file in os.scandir(self.config['data_folder']) if not file.is_dir() and file_pattern in file.name and 'futures' not in file.name]
                     for file in tqdm(files, total=len(files)):
-                        print(f"Processing {file}...")
-                        vol_surfaces, forward_curves = self.extract_vol_surfaces_from_file(f"{self.path}/{file}")
+                        vol_surfaces, forward_curves = self.extract_vol_surfaces_from_file(f"{self.config['data_folder']}/{file}")
 
                         
                         # Loop through the snapshots and surfaces to insert them into the database
@@ -310,67 +368,167 @@ class MarketDataBuilder():
                                                 data_frame_tag_columns=['delta', 'expiry'],
                                                 data_frame_timestamp_column='obs_time')
                         
-                        os.rename(f"{self.path}/{file}", f"{self.path}/Processed/{file}")
+                        if move_old_files == True:
+                            yesterday = date.today() - timedelta(days=1)
+                            file_date = datetime.strptime(file.split("_")[2], "%Y%m%d").date()
+                            if file_date <= yesterday:
+                                os.rename(f"{self.config['data_folder']}/{file}", f"{self.config['data_folder']}/Processed/{file}")
+
                         success = True
         except Exception as e:
-            print(f"An error occurred : {str(e)}")
+            logger.error(f"An error occurred with save_surfaces_to_influxdb: {str(e)}")
 
         return success
 
-
-    @timeit
-    def save_order_book_to_influxdb(self, bucket, file_pattern):
+    def save_rr_analytics_to_influxdb(self, bucket_source, bucket_target):
         """
-        Saves the order book data to an InfluxDB database.
-        
+        Saves risk reversal analytics data to an InfluxDB database.
+        Risk reversals are computed from the delta-based vol surfaces saved in 'bucket_source'.
+
         Parameters:
-        - bucket (str): InfluxDB bucket name.
-        - pattern (str): File pattern for selecting the order book data files.
-        
+        - self: The instance of the class.
+        - bucket_source (str): The name of the source bucket for risk reversal analytics data.
+        - bucket_target (str): The name of the target bucket to save the data to.
+
         Returns:
-        - bool: True if the saving process is successful, False otherwise.
+        - bool: A boolean value indicating the success or failure of the data saving process.
         """
-        success = False
-        if file_pattern == None:
-            file_pattern = self.currency
-        files = [file.name for file in os.scandir(self.path) if not file.is_dir() and file_pattern in file.name]
-        
+        deltas_rr = [5,15,25]
+        tenors = ['7D', '2W', '1M', '2M', '3M', '6M', '1Y']
+        end = datetime.now()
+        start = datetime.strftime(end - timedelta(days = 4), "%Y-%m-%dT%H:%M:%SZ")
+        end = datetime.strftime(end, "%Y-%m-%dT%H:%M:%SZ")
+        fields = ['mid_iv']
+        timeframe = '5m'
+
+        success = True
+        wrapper = InfluxDBWrapper(self.config['database']['url'], self.config['database']['token'], self.config['database']['org'], db_timeout=30_000)
+
+        rr_vols = wrapper.get_historical_risk_reversal_by_delta_and_tenor(bucket_source, 'volatility',
+                                                                            start,
+                                                                            end,
+                                                                            deltas_rr, tenors, fields, timeframe=timeframe)
+
+        moving_averages = pd.DataFrame()
+        for delta in deltas_rr:
+            for tenor in tenors:
+                data = rr_vols[(rr_vols['delta'] == delta) & (rr_vols['tenor'] == tenor)]
+
+                new_data = pd.DataFrame()
+                new_data['timestamp'] = data['timestamp']
+                new_data['delta'] = delta
+                new_data['tenor'] = tenor
+                new_data['mavg'] = data['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).mean()
+                std = data['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).std()
+                new_data['upper'] = new_data['mavg'] + 3 * std
+                new_data['lower'] = new_data['mavg'] - 3 * std
+
+                new_data = new_data.loc[new_data['upper'].first_valid_index():]
+                
+                moving_averages = pd.concat([moving_averages, new_data], axis = 0)
+
         try:
-            with InfluxDBClient(url=config['database']['url'], token=config['database']['token'], org=config['database']['org'], timeout=30_000) as client:
-                for file in tqdm(files, total=len(files)):
-                    print(f"Processing {file}...")
-                    data = self.get_option_data(f"{self.path}/{file}")
+            with InfluxDBClient(url=self.config['database']['url'], token=self.config['database']['token'], org=self.config['database']['org'], timeout=30_000) as client:
+                with client.write_api() as write_api:
+                    write_api.write(bucket=bucket_target, 
+                                    record=rr_vols, 
+                                    data_frame_measurement_name="risk_reversal",
+                                    data_frame_tag_columns=['field', 'delta', 'tenor'],
+                                    data_frame_timestamp_column='timestamp')
+                    
+                    write_api.write(bucket=bucket_target, 
+                                    record=moving_averages, 
+                                    data_frame_measurement_name="risk_reversal",
+                                    data_frame_tag_columns=['delta', 'tenor'],
+                                    data_frame_timestamp_column='timestamp')
 
-                    with client.write_api() as write_api:
-                        write_api.write(bucket=bucket, 
-                                        record=data, 
-                                        data_frame_measurement_name="5min_order_book_measurement",
-                                        data_frame_tag_columns=['instrument_name'],
-                                        data_frame_timestamp_column='timestamp_datetime')
-                                        # time_precision='ms')
-
-                    processed_folder = f"{self.path}/Processed"
-                    if not os.path.exists(processed_folder):
-                        os.makedirs(processed_folder)
-                        
-                    os.rename(f"{self.path}/{file}", f"{processed_folder}/{file}")
-
-                    success = True
         except Exception as e:
-                    print(f"An error occurred : {str(e)}")
+            success = False
+            logger.error(f"An error occurred with save_rr_analytics_to_influxdb: {str(e)}")
 
+        return success
 
+    def save_eth_vs_btc_analytics_to_influxdb(self, bucket_source1, bucket_source2, bucket_target):
+        """
+        Saves ETH vs. BTC vol analytics data to an InfluxDB database.
+
+        Parameters:
+        - self: The instance of the class.
+        - bucket_source1 (str): The name of the first source bucket for the Ethereum data.
+        - bucket_source2 (str): The name of the second source bucket for the Bitcoin data.
+        - bucket_target (str): The name of the target bucket to save the data to.
+
+        Returns:
+        - bool: A boolean value indicating the success or failure of the data saving process.
+        """
+        deltas = ['5P', '10P', '15P', '20P', '25P', '30P', '35P', '40P', '45P', 'ATM', '45C', '40C', '35C', '30C', '25C', '20C', '15C', '10C', '5C']
+        tenors = ['7D', '2W', '1M', '2M', '3M', '6M', '1Y']
+        end = datetime.now()
+        start = datetime.strftime(end - timedelta(days = 4), "%Y-%m-%dT%H:%M:%SZ")
+        end = datetime.strftime(end, "%Y-%m-%dT%H:%M:%SZ")
+        fields = ['mid_iv']
+        timeframe = '5m'
+
+        success = True
+        wrapper = InfluxDBWrapper(self.config['database']['url'], self.config['database']['token'], self.config['database']['org'], db_timeout=30_000)
+
+        for delta in deltas:
+            for tenor in tenors:
+                rr_vols = wrapper.get_historical_vol_diff_by_delta_and_tenor(bucket_ccy1=bucket_source1,
+                                                                     bucket_ccy2=bucket_source2,
+                                                                     measurement='volatility',
+                                                                     range_start=start,
+                                                                     range_end=end,
+                                                                     delta=delta,
+                                                                     field=fields,
+                                                                     tenor=tenor,
+                                                                     timeframe=timeframe)
+                rr_vols['value'] = rr_vols['value'].ffill()
+                
+                rr_vols['mavg'] = rr_vols['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).mean()
+                std = rr_vols['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).std()
+                rr_vols['upper'] = rr_vols['mavg'] + 3 * std
+                rr_vols['lower'] = rr_vols['mavg'] - 3 * std
+
+                rr_vols = rr_vols.loc[rr_vols['upper'].first_valid_index():]
+
+                try:
+                    with InfluxDBClient(url=self.config['database']['url'], token=self.config['database']['token'], org=self.config['database']['org'], timeout=30_000) as client:
+                        with client.write_api() as write_api:
+                            write_api.write(bucket=bucket_target, 
+                                            record=rr_vols, 
+                                            data_frame_measurement_name="eth_vs_btc",
+                                            data_frame_tag_columns=['field', 'delta', 'tenor'],
+                                            data_frame_timestamp_column='timestamp')
+                          
+                except Exception as e:
+                    success = False
+                    logger.error(f"An error occurred with save_eth_vs_btc_analytics_to_influxdb: {str(e)}")
+
+        return success
+    
+    @timeit
+    def save_all_to_influxdb(self):
+        """
+        Saves various data to InfluxDB, including order books, volatility surfaces, and risk reversal analytics.
+        """
+        self.save_order_book_to_influxdb('eth_deribit_order_book', 'eth_5m', light_book=True, move_old_files=False)
+        self.save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m', light_book=True, move_old_files=False)
+        self.save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m', move_old_files=True)
+        self.save_surfaces_to_influxdb('eth_vol_surfaces', file_pattern='eth_5m', move_old_files=True)
+        self.save_rr_analytics_to_influxdb(bucket_source='btc_vol_surfaces',\
+                                          bucket_target='btc_vol_analytics')
+        self.save_rr_analytics_to_influxdb(bucket_source='eth_vol_surfaces',\
+                                          bucket_target='eth_vol_analytics')
+        self.save_eth_vs_btc_analytics_to_influxdb(bucket_source1='eth_vol_surfaces',
+                                                  bucket_source2='btc_vol_surfaces',
+                                                  bucket_target='eth_vol_analytics')
+ 
 if __name__ == "__main__":
     
-    config = read_json('config.json')
-    
-    md_builder_btc = MarketDataBuilder(config['data_folder'], 'btc')
-    md_builder_eth = MarketDataBuilder(config['data_folder'], 'eth')
+    md_builder = MarketDataBuilder('config.json')
 
-    # save full order books in InfluxDB 
-    # md_builder_btc.save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m')
-    # md_builder_eth.save_order_book_to_influxdb('eth_deribit_order_book', 'eth_5m')
-
-    # save volatility surfaces to InfluxDB
-    md_builder_btc.save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m')
-    md_builder_eth.save_surfaces_to_influxdb('eth_vol_surfaces', file_pattern='eth_5m')
+    while True:
+        md_builder.save_all_to_influxdb()
+        
+        time.sleep(300)

@@ -43,9 +43,10 @@ def build_option_expiries(date):
     >>> date = datetime.date(2023, 4, 6)
     >>> expiries = build_option_expiries(date)
     >>> print(expiries)
-    [datetime.date(2023, 4, 7), datetime.date(2023, 4, 8), datetime.date(2023, 4, 14), datetime.date(2023, 4, 21), 
-    datetime.date(2023, 4, 28), datetime.date(2023, 5, 5), datetime.date(2023, 5, 31), datetime.date(2023, 6, 30), 
-    datetime.date(2023, 9, 29), datetime.date(2023, 12, 29)]
+    [datetime.date(2023, 4, 7), datetime.date(2023, 4, 8), datetime.date(2023, 4, 9), 
+    datetime.date(2023, 4, 14), datetime.date(2023, 4, 21), datetime.date(2023, 4, 28), 
+    datetime.date(2023, 5, 26), datetime.date(2023, 6, 30), datetime.date(2023, 9, 29), 
+    datetime.date(2023, 12, 29), datetime.date(2024, 3, 29)]
     """
     if type(date) != datetime.date:
         date = date.date()
@@ -69,14 +70,33 @@ def build_option_expiries(date):
         count=4,
         bymonth=(3, 6, 9, 12),
         bysetpos=-1,
-        dtstart=date + relativedelta(months=1)))
-    quaterlies = [m.date() + relativedelta(day=31, weekday=FR(-1)) for m in quarter_months]
-    
-    return sorted(set([*dailies, *weeklies, *monthlies, *quaterlies]), key=lambda x: x)
+        byweekday=FR,
+        dtstart=date + relativedelta(days=1)))
+    quarterlies = [m.date() + relativedelta(day=31, weekday=FR(-1)) for m in quarter_months]
+
+    return sorted(set([*dailies, *weeklies, *monthlies, *quarterlies]), key=lambda x: x)
 
 def build_future_expiries(date):
-
-    date = date.date()
+    """
+    Given a date, returns a list of future expiration dates for futures contracts. The list includes the next 2 Fridays
+    for weekly expiries, the next 2 last month Fridays for monthly expiries, and the next 4 quarters' last Fridays of
+    the month for quarterly expiries.
+    
+    Args:
+    - date (datetime.date): The starting date to calculate future expiries from.
+    
+    Returns:
+    - List[datetime.date]: A list of datetime.date objects representing future expiration dates for futures contracts.
+    
+    Example:
+    >>> date = datetime.date(2023, 4, 6)
+    >>> expiries = build_future_expiries(date)
+    >>> print(expiries)
+    [datetime.date(2023, 4, 7), datetime.date(2023, 4, 14), datetime.date(2023, 4, 28), datetime.date(2023, 5, 26), 
+    datetime.date(2023, 6, 30), datetime.date(2023, 9, 29), datetime.date(2023, 12, 29), datetime.date(2024, 3, 29)]
+    """
+    if type(date) != datetime.date:
+        date = date.date()
     
     # next 2 fridays for weekly expiries
     weeklies = [date + relativedelta(weeks=0, weekday=FR(0)), \
@@ -92,7 +112,7 @@ def build_future_expiries(date):
         count=4,
         bymonth=(3, 6, 9, 12),
         bysetpos=-1,
-        dtstart=date + relativedelta(months=1)))
+        dtstart=date + relativedelta(days=1)))
     quaterlies = [m.date() + relativedelta(day=31, weekday=FR(-1)) for m in quarter_months]
     
     return sorted(set([*weeklies, *monthlies, *quaterlies]), key=lambda x: x)
@@ -140,14 +160,49 @@ def get_number_of_timeframes_in_one_day(timeframe):
     return timeframes_in_one_day
 
 def add_tenor(date, tenor):
+    """
+    Adds a specified tenor (time duration) to a given date.
+
+    Parameters:
+    - date (datetime): The base date to which the tenor is added.
+    - tenor (str): The tenor notation specifying the time duration (e.g., '7D' for 7 days, '1M' for 1 month).
+
+    Returns:
+    - datetime: The resulting date after adding the specified tenor.
+    
+    Raises:
+    - ValueError: If the tenor notation is invalid.
+    """
     unit = tenor[-1].upper()
     value = int(tenor[:-1])
     
     if unit == 'D':
         return date + relativedelta(days=value)
+    elif unit == 'W':
+        return date + relativedelta(weeks=value)
     elif unit == 'M':
         return date + relativedelta(months=value)
     elif unit == 'Y':
         return date + relativedelta(years=value)
     else:
         raise ValueError("Invalid tenor notation.")
+    
+
+def convert_to_deribit_date(date):
+    """
+    Converts a date string to the Deribit expiry date format.
+
+    Parameters:
+    - date (str): The date string to be converted in the format 'YYYY-MM-DD'.
+
+    Returns:
+    - str: The converted date string in the format 'DDMonYY'.
+
+    Example:
+    - Input: '2022-12-31'
+    - Output: '31DEC22'
+    """
+    date_object = datetime.datetime.strptime(date, '%Y-%m-%d')
+    formatted_date = date_object.strftime('%d%b%y')
+
+    return formatted_date.upper()
