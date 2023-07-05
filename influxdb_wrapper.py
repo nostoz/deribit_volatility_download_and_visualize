@@ -175,10 +175,11 @@ class InfluxDBWrapper():
             measurement (str): The measurement name in the InfluxDB.
             range_start (str): The start of the range for retrieving historical data.
             range_end (str): The end of the range for retrieving historical data.
-            strike (str/list): The strike(s) of the options.
-            expiry (str/list): The expiration date(s) of the options.
-            field (str/list): The field(s) to retrieve from the data.
+            strike (str/list[str]): The strike(s) of the options.
+            expiry (str/list[str]): The expiration date(s) of the options.
+            field (str/list[str]): The field(s) to retrieve from the data.
             timeframe (bool or str, optional): The timeframe to aggregate the data. Defaults to False.
+            include_greeks (bool): The sensitivities (greeks) of the given option(s).
 
         Returns:
             pandas.DataFrame: The historical volatility data for the specified delta and expiry.
@@ -300,9 +301,9 @@ class InfluxDBWrapper():
             measurement (str): The measurement name in the InfluxDB.
             range_start (str): The start of the range for retrieving historical data.
             range_end (str): The end of the range for retrieving historical data.
-            delta (str): The delta value for the options.
-            tenor (str): The tenor value for the options.
-            field (str): The field to retrieve from the data.
+            delta (list[str]/str): The delta value(s) for the options.
+            tenor (list[str]/str): The tenor value(s) for the options.
+            field (list[str]/str): The field(s) to retrieve from the data. Default is mid_iv.
 
         Returns:
             pandas.DataFrame: The historical volatility data for the specified tenor.
@@ -386,9 +387,9 @@ class InfluxDBWrapper():
             measurement (str): The measurement name in the InfluxDB.
             range_start (str): The start of the range for retrieving historical data.
             range_end (str): The end of the range for retrieving historical data.
-            delta (str): The delta value for the options.
-            tenor (str): The tenor value for the options.
-            field (str): The field to retrieve from the data. Default is mid_iv.
+            delta (list[str]/str): The delta value(s) for the options.
+            tenor (list[str]/str): The tenor value(s) for the options.
+            field (list[str]/str): The field(s) to retrieve from the data. Default is mid_iv.
             normalize_by_ATM (bool): Flag indicating whether to normalize the data by ATM. Default is False.
             timeframe (str/bool): Timeframe to be requested from InfluxDB. Let InfluxDB decide if False.
 
@@ -446,9 +447,9 @@ class InfluxDBWrapper():
             measurement (str): The measurement name in the InfluxDB.
             range_start (str): The start of the range for retrieving historical data.
             range_end (str): The end of the range for retrieving historical data.
-            delta (str): The delta value for the options.
-            tenor (str): The tenor value for the options.
-            field (str): The field to retrieve from the data. Default is mid_iv.
+            delta (list[str]/str): The delta value(s) for the options.
+            tenor (list[str]/str): The tenor value(s) for the options.
+            field (list[str]/str): The field(s) to retrieve from the data. Default is mid_iv.
             normalize_by_ATM (bool): Flag indicating whether to normalize the data by ATM. Default is False.
             timeframe (str/bool): Timeframe to be requested from InfluxDB. Let InfluxDB decide if False.
 
@@ -507,9 +508,9 @@ class InfluxDBWrapper():
             measurement (str): The measurement name in the InfluxDB.
             range_start (str): The start of the range for retrieving historical data.
             range_end (str): The end of the range for retrieving historical data.
-            delta (str): The delta value for the options.
-            tenor (str): The tenor value for the options.
-            field (str): The field to retrieve from the data. Default is mid_iv.
+            delta (list[str]/str): The delta value(s) for the options.
+            tenor (list[str]/str): The tenor value(s) for the options.
+            field (list[str]/str): The field(s) to retrieve from the data. Default is mid_iv.
             timeframe (str/bool): Timeframe to be requested from InfluxDB. Let InfluxDB decide if False.
 
         Returns:
