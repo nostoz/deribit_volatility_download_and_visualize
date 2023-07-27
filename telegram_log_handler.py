@@ -1,14 +1,17 @@
 import logging 
 import requests
-
+import getpass
+from datetime import datetime
 class TelegramLogHandler(logging.Handler):
     def __init__(self, bot_token, chat_id):
         super().__init__()
         self.bot_token = bot_token
         self.chat_id = chat_id
+        self.username = getpass.getuser()
 
     def emit(self, record):
-        log_entry = self.format(record)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = f"{timestamp} - {self.username} - {self.format(record)}"
         self.send_telegram_message(log_entry)
 
     def send_telegram_message(self, message):
