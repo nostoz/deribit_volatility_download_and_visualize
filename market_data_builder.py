@@ -8,6 +8,7 @@ import os
 import time
 from datetime import datetime, date, timedelta
 import logging 
+from telegram_log_handler import TelegramLogHandler
 
 from influxdb_client import InfluxDBClient
 from influxdb_wrapper import InfluxDBWrapper
@@ -21,7 +22,11 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S')
 
+config = read_json('config.json')
 logger = logging.getLogger(__name__)
+if config['telegram']['enabled'] == True:
+    telegram_handler = TelegramLogHandler(config['telegram']['bot_token'], config['telegram']['chat_id'])
+    logger.addHandler(telegram_handler)
 
 class MarketDataBuilder():
     
@@ -276,7 +281,57 @@ class MarketDataBuilder():
             logger.error(f"An error occurred: {str(e)}")
             
         return success
-    
+    @timeit
+    def save_future_order_book_to_influxdb(self, bucket, file_pattern, light_book = True, move_old_files=False):
+        """
+        Saves the future order book data to an InfluxDB database.
+        
+        Parameters:
+        - bucket (str): InfluxDB bucket name.
+        - pattern (str): File pattern for selecting the order book data files.
+        - light_book(bool) : Save a light version of the order book (e.g. no depth of order book)
+        - move_old_files(bool) : Move the files older than today to the Processed folder once processed if True.
+        
+        Returns:
+        - bool: True if the saving process is successful, False otherwise.
+        """
+        success = False
+        files = [file.name for file in os.scandir(self.config['data_folder']) if not file.is_dir() and file_pattern in file.name and 'options' not in file.name]
+        
+        try:
+            with InfluxDBClient(url=self.config['database']['url'], token=self.config['database']['token'], org=self.config['database']['org'], timeout=30_000) as client:
+                for file in tqdm(files, total=len(files)):
+                    data = pd.read_parquet(f"{self.config['data_folder']}/{file}")
+
+                    if light_book == True:
+                        columns_to_keep = ['timestamp', 'settlement_price', 'open_interest', 'mark_price', 'last_price', 'instrument_name',\
+                                            'index_price', 'best_bid_price', 'best_bid_amount', 'best_ask_price', 'best_ask_amount']
+                        data = data[columns_to_keep]
+
+
+                    data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
+                    with client.write_api() as write_api:
+                        write_api.write(bucket=bucket, 
+                                        record=data, 
+                                        data_frame_measurement_name="future_order_book",
+                                        data_frame_tag_columns=['instrument_name'],
+                                        data_frame_timestamp_column='timestamp')
+                                        # time_precision='s')
+
+                    processed_folder = f"{self.config['data_folder']}/Processed"
+                    if not os.path.exists(processed_folder):
+                        os.makedirs(processed_folder)
+                        
+                    if move_old_files == True:
+                        yesterday = date.today() - timedelta(days=1)
+                        file_date = datetime.strptime(file.split("_")[2], "%Y%m%d").date()
+                        if file_date <= yesterday:
+                            os.rename(f"{self.config['data_folder']}/{file}", f"{self.config['data_folder']}/Processed/{file}")
+
+                    success = True
+        except Exception as e:
+                    logger.error(f"An error occurred with save_order_book_to_influxdb: {str(e)}")
+    @timeit
     def save_order_book_to_influxdb(self, bucket, file_pattern, light_book = True, move_old_files=False):
         """
         Saves the order book data to an InfluxDB database.
@@ -323,13 +378,13 @@ class MarketDataBuilder():
                     if move_old_files == True:
                         yesterday = date.today() - timedelta(days=1)
                         file_date = datetime.strptime(file.split("_")[2], "%Y%m%d").date()
-                        if file_date < yesterday:
+                        if file_date <= yesterday:
                             os.rename(f"{self.config['data_folder']}/{file}", f"{self.config['data_folder']}/Processed/{file}")
 
                     success = True
         except Exception as e:
                     logger.error(f"An error occurred with save_order_book_to_influxdb: {str(e)}")
-
+    @timeit
     def save_surfaces_to_influxdb(self, bucket, file_pattern, move_old_files=False):
         """
         Saves the volatility surfaces and forward curves to an InfluxDB database.
@@ -351,6 +406,7 @@ class MarketDataBuilder():
 
                     files = [file.name for file in os.scandir(self.config['data_folder']) if not file.is_dir() and file_pattern in file.name and 'futures' not in file.name]
                     for file in tqdm(files, total=len(files)):
+                        logger.info(f'Processing {file} in save_surfaces_to_influxdb')
                         vol_surfaces, forward_curves = self.extract_vol_surfaces_from_file(f"{self.config['data_folder']}/{file}")
 
                         
@@ -372,6 +428,7 @@ class MarketDataBuilder():
                             yesterday = date.today() - timedelta(days=1)
                             file_date = datetime.strptime(file.split("_")[2], "%Y%m%d").date()
                             if file_date <= yesterday:
+                                logger.info(f'Moving file {file} to Processed folder')
                                 os.rename(f"{self.config['data_folder']}/{file}", f"{self.config['data_folder']}/Processed/{file}")
 
                         success = True
@@ -379,7 +436,7 @@ class MarketDataBuilder():
             logger.error(f"An error occurred with save_surfaces_to_influxdb: {str(e)}")
 
         return success
-
+    @timeit
     def save_rr_analytics_to_influxdb(self, bucket_source, bucket_target):
         """
         Saves risk reversal analytics data to an InfluxDB database.
@@ -396,7 +453,7 @@ class MarketDataBuilder():
         deltas_rr = [5,15,25]
         tenors = ['7D', '2W', '1M', '2M', '3M', '6M', '1Y']
         end = datetime.now()
-        start = datetime.strftime(end - timedelta(days = 4), "%Y-%m-%dT%H:%M:%SZ")
+        start = datetime.strftime(end - timedelta(days = 3), "%Y-%m-%dT%H:%M:%SZ")
         end = datetime.strftime(end, "%Y-%m-%dT%H:%M:%SZ")
         fields = ['mid_iv']
         timeframe = '5m'
@@ -447,7 +504,7 @@ class MarketDataBuilder():
             logger.error(f"An error occurred with save_rr_analytics_to_influxdb: {str(e)}")
 
         return success
-
+    @timeit
     def save_eth_vs_btc_analytics_to_influxdb(self, bucket_source1, bucket_source2, bucket_target):
         """
         Saves ETH vs. BTC vol analytics data to an InfluxDB database.
@@ -464,7 +521,7 @@ class MarketDataBuilder():
         deltas = ['5P', '10P', '15P', '20P', '25P', '30P', '35P', '40P', '45P', 'ATM', '45C', '40C', '35C', '30C', '25C', '20C', '15C', '10C', '5C']
         tenors = ['7D', '2W', '1M', '2M', '3M', '6M', '1Y']
         end = datetime.now()
-        start = datetime.strftime(end - timedelta(days = 4), "%Y-%m-%dT%H:%M:%SZ")
+        start = datetime.strftime(end - timedelta(days = 3), "%Y-%m-%dT%H:%M:%SZ")
         end = datetime.strftime(end, "%Y-%m-%dT%H:%M:%SZ")
         fields = ['mid_iv']
         timeframe = '5m'
@@ -474,7 +531,8 @@ class MarketDataBuilder():
 
         for delta in deltas:
             for tenor in tenors:
-                rr_vols = wrapper.get_historical_vol_diff_by_delta_and_tenor(bucket_ccy1=bucket_source1,
+                print(f"delta: {delta}, tenor {tenor}")
+                vol_diff, leg_eth, leg_btc = wrapper.get_historical_vol_diff_by_delta_and_tenor(bucket_ccy1=bucket_source1,
                                                                      bucket_ccy2=bucket_source2,
                                                                      measurement='volatility',
                                                                      range_start=start,
@@ -482,22 +540,34 @@ class MarketDataBuilder():
                                                                      delta=delta,
                                                                      field=fields,
                                                                      tenor=tenor,
-                                                                     timeframe=timeframe)
-                rr_vols['value'] = rr_vols['value'].ffill()
+                                                                     timeframe=timeframe,
+                                                                     include_vol_by_leg=True)
+                vol_diff['value'] = vol_diff['value'].ffill()
                 
-                rr_vols['mavg'] = rr_vols['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).mean()
-                std = rr_vols['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).std()
-                rr_vols['upper'] = rr_vols['mavg'] + 3 * std
-                rr_vols['lower'] = rr_vols['mavg'] - 3 * std
+                vol_diff['mavg'] = vol_diff['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).mean()
+                std = vol_diff['value'].rolling(2*get_number_of_timeframes_in_one_day(timeframe)).std()
+                vol_diff['upper'] = vol_diff['mavg'] + 3 * std
+                vol_diff['lower'] = vol_diff['mavg'] - 3 * std
 
-                rr_vols = rr_vols.loc[rr_vols['upper'].first_valid_index():]
+                vol_diff = vol_diff.loc[vol_diff['upper'].first_valid_index():]
 
                 try:
                     with InfluxDBClient(url=self.config['database']['url'], token=self.config['database']['token'], org=self.config['database']['org'], timeout=30_000) as client:
                         with client.write_api() as write_api:
                             write_api.write(bucket=bucket_target, 
-                                            record=rr_vols, 
+                                            record=vol_diff, 
                                             data_frame_measurement_name="eth_vs_btc",
+                                            data_frame_tag_columns=['field', 'delta', 'tenor'],
+                                            data_frame_timestamp_column='timestamp')
+                            
+                            write_api.write(bucket='eth_vol_analytics', 
+                                            record=leg_eth.reset_index(), 
+                                            data_frame_measurement_name="volatility",
+                                            data_frame_tag_columns=['field', 'delta', 'tenor'],
+                                            data_frame_timestamp_column='timestamp')
+                            write_api.write(bucket='btc_vol_analytics', 
+                                            record=leg_btc.reset_index(), 
+                                            data_frame_measurement_name="volatility",
                                             data_frame_tag_columns=['field', 'delta', 'tenor'],
                                             data_frame_timestamp_column='timestamp')
                           
@@ -506,7 +576,7 @@ class MarketDataBuilder():
                     logger.error(f"An error occurred with save_eth_vs_btc_analytics_to_influxdb: {str(e)}")
 
         return success
-    
+   
     @timeit
     def save_all_to_influxdb(self):
         """
@@ -523,12 +593,13 @@ class MarketDataBuilder():
         self.save_eth_vs_btc_analytics_to_influxdb(bucket_source1='eth_vol_surfaces',
                                                   bucket_source2='btc_vol_surfaces',
                                                   bucket_target='eth_vol_analytics')
- 
+        self.save_future_order_book_to_influxdb('eth_deribit_order_book', 'eth_5m', light_book=True, move_old_files=True)
+        self.save_future_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m', light_book=True, move_old_files=True)
+
 if __name__ == "__main__":
-    
+    logger.info('Starting market data builder')
     md_builder = MarketDataBuilder('config.json')
 
     while True:
         md_builder.save_all_to_influxdb()
-        
         time.sleep(300)

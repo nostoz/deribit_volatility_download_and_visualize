@@ -188,7 +188,7 @@ def add_tenor(date, tenor):
         raise ValueError("Invalid tenor notation.")
     
 
-def convert_to_deribit_date(date):
+def convert_to_deribit_date(date, reverse=False):
     """
     Converts a date string to the Deribit expiry date format.
 
@@ -202,7 +202,16 @@ def convert_to_deribit_date(date):
     - Input: '2022-12-31'
     - Output: '31DEC22'
     """
-    date_object = datetime.datetime.strptime(date, '%Y-%m-%d')
-    formatted_date = date_object.strftime('%d%b%y')
+    try:
+        date_object = datetime.datetime.strptime(date, '%Y-%m-%d')
+        formatted_date = date_object.strftime('%d%b%y')
+    except:
+        formatted_date = date
 
     return formatted_date.upper()
+    
+def convert_from_deribit_date(date):
+    try:
+        return datetime.datetime.strptime(date, '%d%b%y').strftime('%Y-%m-%d')
+    except:
+        return date

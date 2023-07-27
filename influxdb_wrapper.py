@@ -1,8 +1,10 @@
 from influxdb_client import InfluxDBClient
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
-from utils import read_json, build_option_expiries, add_tenor, timeit, convert_to_deribit_date
+from utils import read_json, build_option_expiries, add_tenor, timeit, get_number_of_timeframes_in_one_day, \
+      convert_to_deribit_date, build_future_expiries, convert_from_deribit_date
 
 
 
@@ -214,6 +216,48 @@ class InfluxDBWrapper():
 
             return pd.DataFrame(data=result.to_values(columns=['_time', '_value', '_field', 'instrument_name']), columns=['timestamp', 'value', 'field', 'instrument_name'])
 
+    def get_historical_future_price_for_expiry(self, bucket, measurement, range_start, range_end, expiry, field, timeframe = False):
+        """
+        Retrieves the historical volatility data for a specific delta and expiry range.
+
+        Args:
+            bucket (str): The name of the InfluxDB bucket.
+            measurement (str): The measurement name in the InfluxDB.
+            range_start (str): The start of the range for retrieving historical data.
+            range_end (str): The end of the range for retrieving historical data.
+            expiry (str/list[str]): The expiration date(s) of the future.
+            field (str/list[str]): The field(s) to retrieve from the data.
+            timeframe (bool or str, optional): The timeframe to aggregate the data. Defaults to False.
+
+        Returns:
+            pandas.DataFrame: The historical future prices for the specified expiry(ies).
+        """
+        r_field = self._write_influx_field(field, '_field')
+
+        instruments = []
+        if not isinstance(expiry, list):
+            expiry = [expiry]
+        for exp in expiry:
+            instruments.append(f"{convert_to_deribit_date(exp)}")
+
+        r_instrument = self._write_influx_field(instruments, 'instrument_name', regex=True)
+
+        with InfluxDBClient(url=self.url, token=self.token, org=self.org, timeout=self.timeout) as client:
+            query = f'from(bucket: "{bucket}")\
+                        |> range(start: {range_start}, stop: {range_end})\
+                        |> filter(fn: (r) => r._measurement == "{measurement}") \
+                        |> filter(fn: (r) => r.instrument_name =~ {r_instrument})  \
+                        |> filter(fn: (r) => r._field == {r_field})'
+
+            if timeframe != False:
+                query = f'{query}\n|> aggregateWindow(every: {timeframe}, fn: last, createEmpty: false)'
+
+            result = client.query_api().query(query)
+            result = pd.DataFrame(data=result.to_values(columns=['_time', '_value', '_field', 'instrument_name']), columns=['timestamp', 'value', 'field', 'instrument_name'])
+            result['expiry'] = result['instrument_name'].str[-7:].apply(convert_from_deribit_date)
+
+            return result
+
     def get_historical_vol(self, bucket, measurement, range_start, range_end, field, timeframe = False):
         """
         Retrieves the historical volatility data for a specified range.
@@ -242,7 +286,7 @@ class InfluxDBWrapper():
 
             return pd.DataFrame(data=result.to_values(columns=['_time', '_value', '_field', 'expiry', 'delta']), columns=['timestamp', 'value', 'field', 'expiry', 'delta'])
     
-    def _get_historical_nearby_expiries_for_tenor(self, range_start, range_end, tenor):
+    def _get_historical_nearby_expiries_for_tenor(self, range_start, range_end, tenor, future_expiries=False):
         """
         Private method to retrieve historical nearby expiries for a given tenor. 
         Required to calculate the volatility by tenor.
@@ -255,6 +299,7 @@ class InfluxDBWrapper():
         Returns:
             pandas.DataFrame: The historical nearby expiries for the given tenor.
         """
+        expiry_func = build_future_expiries if future_expiries else build_option_expiries
 
         range_start = datetime.strptime(range_start, "%Y-%m-%dT%H:%M:%SZ").date()
         range_end = datetime.strptime(range_end, "%Y-%m-%dT%H:%M:%SZ").date()
@@ -265,9 +310,9 @@ class InfluxDBWrapper():
         while current_day <= range_end:
             # if end date is today and time is before 11am UTC, expiry roll hasn't happened yet
             if range_end == current_utc_time.date() and current_utc_time.hour < 11:
-                day_expiries = build_option_expiries(current_day - timedelta(days=1))
+                day_expiries = expiry_func(current_day - timedelta(days=1))
             else:
-                day_expiries = build_option_expiries(current_day)
+                day_expiries = expiry_func(current_day)
 
             current_tenor = add_tenor(current_day, tenor)
 
@@ -315,7 +360,7 @@ class InfluxDBWrapper():
         if not isinstance(field, list):
             field = [field]
 
-        unique_expiries = pd.Series()
+        unique_expiries = pd.Series(dtype=object)
         for t in tenor:
             nearby_expiries = self._get_historical_nearby_expiries_for_tenor(range_start, range_end, t)
             nearby_expiries.index = pd.to_datetime(nearby_expiries.index)  
@@ -375,6 +420,86 @@ class InfluxDBWrapper():
                     final_vols = pd.concat([final_vols, pd.DataFrame(data=tenor_vols[['value', 'field', 'delta', 'tenor']], columns=['value', 'field', 'delta', 'tenor'])], axis = 0)
 
         return final_vols.reset_index()
+
+    def get_historical_future_price_for_tenor(self, bucket, measurement, range_start, range_end,
+                                                tenor, field, timeframe = False):
+        """
+        Retrieves the historical future prices for a specific tenor and delta.
+
+        Args:
+            bucket (str): The name of the InfluxDB bucket.
+            measurement (str): The measurement name in the InfluxDB.
+            range_start (str): The start of the range for retrieving historical data.
+            range_end (str): The end of the range for retrieving historical data.
+            tenor (list[str]/str): The tenor value(s) for the future.
+            field (list[str]/str): The field(s) to retrieve from the data. Default is mid_iv.
+
+        Returns:
+            pandas.DataFrame: The historical volatility data for the specified tenor.
+        """
+        if not isinstance(tenor, list):
+            tenor = [tenor]
+        if not isinstance(field, list):
+            field = [field]
+
+        unique_expiries = pd.Series()
+        for t in tenor:
+            nearby_expiries = self._get_historical_nearby_expiries_for_tenor(range_start, range_end, t, future_expiries=True)
+            nearby_expiries.index = pd.to_datetime(nearby_expiries.index)  
+            unique_expiries = pd.concat([unique_expiries, nearby_expiries['expiry1'], nearby_expiries['expiry2']], axis=0)
+
+        unique_expiries = list(unique_expiries.unique())
+
+        result_df = self.get_historical_future_price_for_expiry(bucket=bucket,
+                                                        measurement=measurement,
+                                                        range_start=range_start,
+                                                        range_end=range_end,
+                                                        expiry=unique_expiries,
+                                                        field=field,
+                                                        timeframe=timeframe)
+        print(result_df)
+
+        final_futs = pd.DataFrame()
+        for f in field:
+            for t in tenor:
+                nearby_expiries = self._get_historical_nearby_expiries_for_tenor(range_start, range_end, t, future_expiries=True)
+                futs = result_df[(result_df['field'] == f)].pivot(index='timestamp', columns='expiry', values='value').tz_localize(None).ffill()
+
+                nearby_expiries.index = pd.to_datetime(nearby_expiries.index)
+                nearby_expiries = nearby_expiries.reindex(futs.index, method='ffill') 
+                
+                tenor_futs = pd.DataFrame(index=futs.index)
+
+                tenor_futs['expiry1'] = pd.to_datetime(nearby_expiries['expiry1'])
+                tenor_futs['expiry2'] = pd.to_datetime(nearby_expiries['expiry2'])
+                tenor_futs['rolling_expiry'] = tenor_futs.index.map(lambda x: add_tenor(x, tenor=t))
+
+                tenor_futs['diff_to_exp1'] = abs((tenor_futs['expiry1'] - tenor_futs['rolling_expiry']).dt.days)
+                tenor_futs['diff_to_exp2'] = abs((tenor_futs['expiry2'] - tenor_futs['rolling_expiry']).dt.days)
+                tenor_futs['diff_exp'] = tenor_futs['diff_to_exp1'] + tenor_futs['diff_to_exp2']
+
+                # workaround to handle missing expiries
+                # will need to be refactored 
+                for index, row in tenor_futs.iterrows():
+                    if row['expiry1'] not in futs.columns:
+                        closest_expiry = min(futs.columns, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d') - row['expiry1']).days))
+                        tenor_futs.at[index, 'expiry1'] = closest_expiry
+
+                    if row['expiry2'] not in futs.columns:
+                        closest_expiry = min(futs.columns, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d') - row['expiry2']).days))
+                        tenor_futs.at[index, 'expiry2'] = closest_expiry
+            
+                for idx, row in tenor_futs.iterrows():
+                    interp_fut1 = (1 - row['diff_to_exp1'] / row['diff_exp']) * futs.loc[idx, row['expiry1'].strftime("%Y-%m-%d")]
+                    interp_fut2 = (1 - row['diff_to_exp2'] / row['diff_exp']) * futs.loc[idx, row['expiry2'].strftime("%Y-%m-%d")]
+                    tenor_futs.loc[idx, 'value'] = interp_fut1 + interp_fut2
+                
+                tenor_futs['value'] = tenor_futs['value'].ffill()
+                tenor_futs['field'] = f
+                tenor_futs['tenor'] = t
+                final_futs = pd.concat([final_futs, pd.DataFrame(data=tenor_futs[['value', 'field', 'tenor']], columns=['value', 'field', 'tenor'])], axis = 0)
+
+        return final_futs.reset_index()
     
 
     def get_historical_risk_reversal_by_delta_and_tenor(self, bucket, measurement, range_start, range_end, 
@@ -437,7 +562,7 @@ class InfluxDBWrapper():
         return final_vols.reset_index()
 
     def get_historical_vol_diff_by_delta_and_tenor(self, bucket_ccy1, bucket_ccy2, measurement, range_start, range_end, 
-                                                        delta, tenor, field='mid_iv', timeframe = False):
+                                                        delta, tenor, field='mid_iv', timeframe = False, include_vol_by_leg=False):
         """
         Retrieves the historical risk reversal data for a specific delta and tenor.
 
@@ -489,14 +614,17 @@ class InfluxDBWrapper():
                     mask1 = (history_ccy1['tenor'] == t) & (history_ccy1['field'] == f)
                     mask2 = (history_ccy2['tenor'] == t) & (history_ccy2['field'] == f)
                     res = pd.DataFrame()
-                    res['value'] = (history_ccy1[(mask1) & (history_ccy1['delta'] ==  f"{d}")]['value'] - history_ccy2[(mask2) & (history_ccy1['delta'] == f"{d}")]['value'])
+                    res['value'] = (history_ccy1.loc[(mask1) & (history_ccy1['delta'] ==  f"{d}"), 'value'] - history_ccy2.loc[(mask2) & (history_ccy1['delta'] == f"{d}"), 'value'])
                     res['delta'] = d
                     res['field'] = f
                     res['tenor'] = t
                     
                     final_vols = pd.concat([final_vols, pd.DataFrame(data=res[['value', 'field', 'delta', 'tenor']], columns=['value', 'field', 'delta', 'tenor'])], axis = 0)
         
-        return final_vols.reset_index()
+        if include_vol_by_leg == False:
+            return final_vols.reset_index()
+        else:
+            return final_vols.reset_index(), history_ccy1, history_ccy2
 
     def get_historical_butterfly_by_delta_and_tenor(self, bucket, measurement, range_start, range_end, 
                                                         delta, tenor, field='mid_iv', timeframe = False):
@@ -553,6 +681,48 @@ class InfluxDBWrapper():
                     final_vols = pd.concat([final_vols, pd.DataFrame(data=res[['value', 'field', 'delta', 'tenor']], columns=['value', 'field', 'delta', 'tenor'])], axis = 0)
 
         return final_vols.reset_index()
+    
+    def get_realized_vol_by_period(self, bucket, measurement, range_start, range_end, 
+                                    period, field='index_price', timeframe = False):
+        """
+        Calculates realized volatility for a given time period.
+
+        Parameters:
+        - bucket: The bucket where the data is stored.
+        - measurement: The measurement from which to retrieve the data.
+        - range_start: The start of the range in YYYY-MM-DDTHH:MM:SSZ format.
+        - range_end: The end of the range in YYYY-MM-DDTHH:MM:SSZ format.
+        - period: A list of periods for which to calculate volatility (in days).
+        - field: The field from which to retrieve the data. Defaults to 'index_price'.
+        - timeframe: The timeframe for the data. Defaults to False.
+
+        Returns:
+        - results: A pandas DataFrame containing the timestamp, value, and period for each calculated realized volatility.
+
+        """
+        adjusted_range_start = (datetime.strptime(range_start, "%Y-%m-%dT%H:%M:%SZ") - timedelta(days=max(period))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        history = self.get_historical_future_price_for_expiry(bucket=bucket,
+                                                             measurement=measurement,
+                                                             range_start=adjusted_range_start,
+                                                             range_end=range_end,
+                                                             expiry='PERP',
+                                                             field=field,
+                                                             timeframe=timeframe)
+
+        results = pd.DataFrame()
+        for p in period:
+            data = history.copy()
+
+            data['log_returns'] = np.log(data['value']).diff()
+            data['rolling_variance'] = (data['log_returns']**2).rolling(window=p*get_number_of_timeframes_in_one_day(timeframe)).sum()
+            data['value'] = np.sqrt(data['rolling_variance'] * 365 / p )
+
+            data = data[data['timestamp'] >= range_start]
+            data.loc[:,'period'] = p
+
+            results = pd.concat([results, data[['timestamp', 'value', 'period']]], axis = 0)
+
+        return results
 
     
 if __name__ == "__main__":
@@ -607,6 +777,15 @@ if __name__ == "__main__":
                       include_greeks=True)
     print(history_vol_for_strike_expiry)
 
+    history_fut_prices_for_expiry = wrapper.get_historical_future_price_for_expiry(bucket='eth_deribit_order_book',
+                      measurement='future_order_book',
+                      range_start='2023-05-10T00:00:00Z',
+                      range_end='2023-06-16T12:05:00Z',
+                      expiry=['2023-07-28','2023-12-29', 'PERP'],
+                      field=['mark_price'],
+                      timeframe='4h')
+    print(history_fut_prices_for_expiry)
+
     history_vol_for_tenor = wrapper.get_historical_vol_for_delta_and_tenor(bucket='eth_vol_surfaces',
                       measurement='volatility',
                       range_start='2023-05-24T00:00:00Z',
@@ -617,11 +796,20 @@ if __name__ == "__main__":
                       timeframe='4h')
     print(history_vol_for_tenor)
 
+    history_fut_price_for_tenor = wrapper.get_historical_future_price_for_tenor(bucket='eth_deribit_order_book',
+                      measurement='future_order_book',
+                      range_start='2023-05-24T00:00:00Z',
+                      range_end='2023-06-28T00:00:00Z',
+                      tenor=['7D', '1M'],
+                      field='mark_price',
+                      timeframe='4h')
+    print(history_fut_price_for_tenor)
+
     history_vol_diff_for_tenor = wrapper.get_historical_vol_diff_by_delta_and_tenor(bucket_ccy1='eth_vol_surfaces',
                       bucket_ccy2='btc_vol_surfaces',
                       measurement='volatility',
-                      range_start='2023-06-01T00:00:00Z',
-                      range_end='2023-06-20T00:00:00Z',
+                      range_start='2023-07-01T00:00:00Z',
+                      range_end='2023-07-10T13:00:00Z',
                       delta=['15C', 'ATM'],
                       tenor=['7D', '90D'],
                       field='mid_iv',
@@ -647,3 +835,13 @@ if __name__ == "__main__":
                       field='mid_iv',
                       timeframe='15m')
     print(history_flies)
+
+    realized_vols = wrapper.get_realized_vol_by_period(bucket='btc_deribit_order_book',
+                      measurement='future_order_book',
+                      range_start='2023-06-01T00:00:00Z',
+                      range_end='2023-07-27T14:00:00Z',
+                      period=[7, 14, 30],
+                      timeframe='30m')
+    print(realized_vols[realized_vols['period'] == 7])
+    print(realized_vols[realized_vols['period'] == 14])
+    print(realized_vols[realized_vols['period'] == 30])
