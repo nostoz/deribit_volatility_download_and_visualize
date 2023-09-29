@@ -63,9 +63,15 @@ def fetch_instrument_data(inst, depth = 10):
     while retries > 0:
         try:
             response = requests.get(base_url + endpoint, params=params)
-        except Exception as e:
+        except ConnectionResetError as e:
             logger.error(f"Failed to fetch data for {inst}.\nException arised during request: {e}")
-            return None
+            retries -= 1
+            time.sleep(0.01)
+            continue
+        except Exception as e:
+            retries -= 1
+            logger.error(f"Failed to fetch data for {inst}.\nException arised during request: {e}")
+            continue
         result = response.json()
         if 'error' in result and result['error']['code'] == 10028:
             wait_time = int(response.headers.get('retry-after', '2'))
@@ -76,7 +82,7 @@ def fetch_instrument_data(inst, depth = 10):
             return result['result']
     
     # if we get here, it means the request failed
-    logger.error(f"Failed to fetch data for {inst}.\nUnexpected response: {result}")
+    logger.error(f"Failed to fetch data for {inst} after 5 tries.\nUnexpected response: {result}")
     return None
 
 

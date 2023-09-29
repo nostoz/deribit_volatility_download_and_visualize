@@ -258,7 +258,7 @@ class InfluxDBWrapper():
 
             return result
 
-    def get_historical_vol(self, bucket, measurement, range_start, range_end, field, timeframe = False):
+    def get_historical_vol(self, bucket, measurement, range_start, range_end, field, timeframe = False, include_greeks=False):
         """
         Retrieves the historical volatility data for a specified range.
 
@@ -272,6 +272,8 @@ class InfluxDBWrapper():
         Returns:
             pandas.DataFrame: The historical volatility data for the specified range.
         """
+        if include_greeks == True:
+            field = field + ['delta', 'gamma', 'rho', 'theta', 'vega']
         r_field = self._write_influx_field(field, '_field')
         with InfluxDBClient(url=self.url, token=self.token, org=self.org, timeout=self.timeout) as client:
             query = f'from(bucket: "{bucket}")\
@@ -284,7 +286,12 @@ class InfluxDBWrapper():
 
             result = client.query_api().query(query)
 
-            return pd.DataFrame(data=result.to_values(columns=['_time', '_value', '_field', 'expiry', 'delta']), columns=['timestamp', 'value', 'field', 'expiry', 'delta'])
+            result = pd.DataFrame(data=result.to_values(columns=['_time', '_value', '_field', 'instrument_name']), columns=['timestamp', 'value', 'field', 'instrument_name'])
+            result[['asset', 'expiry', 'strike', 'cp']] = \
+                result['instrument_name'].str.extract(r'([A-Z]+)-(\d{1,2}[A-Z]+[\d]{2})-(\d+)-([CP])')
+
+            return result
+        
     
     def _get_historical_nearby_expiries_for_tenor(self, range_start, range_end, tenor, future_expiries=False):
         """
@@ -457,7 +464,6 @@ class InfluxDBWrapper():
                                                         expiry=unique_expiries,
                                                         field=field,
                                                         timeframe=timeframe)
-        print(result_df)
 
         final_futs = pd.DataFrame()
         for f in field:
@@ -588,6 +594,11 @@ class InfluxDBWrapper():
         if not isinstance(field, list):
             field = [field]
 
+        timeframe_mapping = {
+            "m": "T",
+            "h": "H",
+            "d": "D"
+        }
 
         history_ccy1 = self.get_historical_vol_for_delta_and_tenor(bucket=bucket_ccy1,
                       measurement=measurement,
@@ -596,7 +607,7 @@ class InfluxDBWrapper():
                       delta=delta,
                       tenor=tenor,
                       field=field,
-                      timeframe=timeframe).set_index('timestamp')
+                      timeframe=timeframe).set_index('timestamp').resample(f"{timeframe[:-1]}{timeframe_mapping[timeframe[-1]]}").fillna(method='ffill')
         
         history_ccy2 = self.get_historical_vol_for_delta_and_tenor(bucket=bucket_ccy2,
                       measurement=measurement,
@@ -605,7 +616,7 @@ class InfluxDBWrapper():
                       delta=delta,
                       tenor=tenor,
                       field=field,
-                      timeframe=timeframe).set_index('timestamp')
+                      timeframe=timeframe).set_index('timestamp').resample(f"{timeframe[:-1]}{timeframe_mapping[timeframe[-1]]}").fillna(method='ffill')
 
         final_vols = pd.DataFrame()
         for d in delta:
@@ -748,12 +759,13 @@ if __name__ == "__main__":
                       field='mid_iv')
     print(vol_surface)
 
-    history_vol = wrapper.get_historical_vol(bucket='eth_vol_surfaces',
-                      measurement='volatility',
-                      range_start='2023-06-24T00:00:00Z',
-                      range_end='2023-06-29T05:05:00Z',
-                      field=['mid_iv'],
-                      timeframe='4h')
+    history_vol = wrapper.get_historical_vol(bucket='eth_deribit_order_book',
+                      measurement='order_book',
+                      range_start='2023-09-23T11:45:00Z',
+                      range_end='2023-09-23T11:50:00Z',
+                      field=['mark_iv', 'strike', 'expiry', 'delta'],
+                      timeframe='5m',
+                      include_greeks=True)
     print(history_vol)
     
     history_vol_for_delta_expiry = wrapper.get_historical_vol_for_delta_and_expiry(bucket='eth_vol_surfaces',

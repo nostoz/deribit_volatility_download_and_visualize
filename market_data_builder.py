@@ -531,7 +531,7 @@ class MarketDataBuilder():
 
         for delta in deltas:
             for tenor in tenors:
-                print(f"delta: {delta}, tenor {tenor}")
+                # print(f"delta: {delta}, tenor {tenor}")
                 vol_diff, leg_eth, leg_btc = wrapper.get_historical_vol_diff_by_delta_and_tenor(bucket_ccy1=bucket_source1,
                                                                      bucket_ccy2=bucket_source2,
                                                                      measurement='volatility',
@@ -583,9 +583,9 @@ class MarketDataBuilder():
         Saves various data to InfluxDB, including order books, volatility surfaces, and risk reversal analytics.
         """
         self.save_order_book_to_influxdb('eth_deribit_order_book', 'eth_5m', light_book=True, move_old_files=False)
+        self.save_surfaces_to_influxdb('eth_vol_surfaces', file_pattern='eth_5m', move_old_files=True)
         self.save_order_book_to_influxdb('btc_deribit_order_book', 'btc_5m', light_book=True, move_old_files=False)
         self.save_surfaces_to_influxdb('btc_vol_surfaces', file_pattern='btc_5m', move_old_files=True)
-        self.save_surfaces_to_influxdb('eth_vol_surfaces', file_pattern='eth_5m', move_old_files=True)
         self.save_rr_analytics_to_influxdb(bucket_source='btc_vol_surfaces',\
                                           bucket_target='btc_vol_analytics')
         self.save_rr_analytics_to_influxdb(bucket_source='eth_vol_surfaces',\

@@ -20,6 +20,10 @@ class TelegramLogHandler(logging.Handler):
             "chat_id": self.chat_id,
             "text": message
         }
-        response = requests.post(url, json=payload)
-        if response.status_code != 200:
-            print(f"Failed to send Telegram message. Error code: {response.status_code}")
+        try :
+            response = requests.post(url, json=payload)
+            if response.status_code != 200:
+                print(f"Failed to send Telegram message. Error code: {response.status_code}")
+        except Exception as e:
+            print(f"Telegram request failed with exception :\n{e}")
+        
