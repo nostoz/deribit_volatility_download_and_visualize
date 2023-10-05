@@ -30,6 +30,10 @@ base_url = "https://www.deribit.com/api/v2/"
 
 # folder where will be stored the downloaded market data
 data_folder = 'data'
+if not os.path.exists(data_folder):
+    os.mkdir(data_folder)
+if not os.path.exists(os.path.join(data_folder, 'Processed')):
+    os.mkdir(os.path.join(data_folder, 'Processed'))
 
 coins = ['BTC', 'ETH']
 timeframe = '5m'
